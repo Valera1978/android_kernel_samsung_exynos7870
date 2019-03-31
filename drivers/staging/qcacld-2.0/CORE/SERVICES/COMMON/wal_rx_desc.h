@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2012, 2014, 2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2012, 2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -68,9 +68,6 @@ struct hw_rx_desc_base {
 };
 #endif
 
-#define FW_MSDU_INFO_FIRST_WAKEUP_M 0x40
-#define FW_MSDU_INFO_FIRST_WAKEUP_S 6
-
 /*
  * This struct defines the basic MSDU rx descriptor created by FW.
  */
@@ -88,9 +85,6 @@ struct fw_rx_desc_base {
         A_UINT8     val;
     }u;
 };
-
-#define FW_MSDU_INFO_FIRST_WAKEUP_M 0x40
-#define FW_MSDU_INFO_FIRST_WAKEUP_S 6
 
 #define FW_RX_DESC_DISCARD_M 0x1
 #define FW_RX_DESC_DISCARD_S 0

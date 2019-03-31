@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -42,6 +42,12 @@
 #ifndef _ANIGLOBAL_H
 #define _ANIGLOBAL_H
 
+// Take care to avoid redefinition of this type, if it is
+// already defined in "halWmmApi.h"
+#if !defined(_HALMAC_WMM_API_H)
+typedef struct sAniSirGlobal *tpAniSirGlobal;
+#endif
+
 #include "halTypes.h"
 #include "sirCommon.h"
 #include "aniSystemDefs.h"
@@ -68,6 +74,7 @@
 #include "smeInternal.h"
 #include "sapApi.h"
 #include "ccmApi.h"
+#include "btcApi.h"
 #include "csrInternal.h"
 
 #ifdef FEATURE_OEM_DATA_SUPPORT
@@ -91,8 +98,6 @@
 
 // New HAL API interface defs.
 #include "logDump.h"
-
-#include "ol_txrx_ctrl_api.h"
 
 //Check if this definition can actually move here from halInternal.h even for Volans. In that case
 //this featurization can be removed.
@@ -153,9 +158,9 @@
 #define CFG_SAP_NSS(_x)     ((((_x) >> 2) & 0x3) ? (((_x) >> 2) & 0x3) : 1)
 #define CFG_P2P_GO_NSS(_x)  ((((_x) >> 4) & 0x3) ? (((_x) >> 4) & 0x3) : 1)
 #define CFG_P2P_CLI_NSS(_x) ((((_x) >> 6) & 0x3) ? (((_x) >> 6) & 0x3) : 1)
-#define CFG_IBSS_NSS(_x)    ((((_x) >> 8) & 0x3) ? (((_x) >> 8) & 0x3) : 1)
-#define CFG_TDLS_NSS(_x)    ((((_x) >> 10) & 0x3) ? (((_x) >> 10) & 0x3) : 1)
-#define CFG_P2P_DEV_NSS(_x) ((((_x) >> 12) & 0x3) ? (((_x) >> 12) & 0x3) : 1)
+#define CFG_P2P_DEV_NSS(_x) ((((_x) >> 8) & 0x3) ? (((_x) >> 8) & 0x3) : 1)
+#define CFG_IBSS_NSS(_x)    ((((_x) >> 10) & 0x3) ? (((_x) >> 10) & 0x3) : 1)
+#define CFG_TDLS_NSS(_x)    ((((_x) >> 12) & 0x3) ? (((_x) >> 12) & 0x3) : 1)
 #define CFG_OCB_NSS(_x)     ((((_x) >> 14) & 0x3) ? (((_x) >> 14) & 0x3) : 1)
 
 /**
@@ -176,7 +181,6 @@ enum log_event_type {
  * @WLAN_LOG_INDICATOR_FRAMEWORK: Framework triggers bug report
  * @WLAN_LOG_INDICATOR_HOST_DRIVER: Host driver triggers bug report
  * @WLAN_LOG_INDICATOR_FIRMWARE: FW initiates bug report
- * @WLAN_LOG_INDICATOR_HOST_ONLY: Host triggers fatal event bug report
  *
  * Enum indicating the module that triggered the bug report
  */
@@ -185,69 +189,51 @@ enum log_event_indicator {
 	WLAN_LOG_INDICATOR_FRAMEWORK,
 	WLAN_LOG_INDICATOR_HOST_DRIVER,
 	WLAN_LOG_INDICATOR_FIRMWARE,
-	WLAN_LOG_INDICATOR_HOST_ONLY,
-};
-
-/**
- * enum log_dump_trace_mask - Mask to indicate what traces to log
- * @DUMP_NO_TRACE: Do not dump any logs
- * @DUMP_VOS_TRACE: Dump vos trace logs
- * @DUMP_PACKET_TRACE: Dump packet trace
- *
- */
-enum log_dump_trace_mask {
-	DUMP_NO_TRACE      = 0x0,
-	DUMP_VOS_TRACE     = 0x1,
-	DUMP_PACKET_TRACE  = 0x2
 };
 
 /**
  * enum log_event_host_reason_code - Reason code for bug report
  * @WLAN_LOG_REASON_CODE_UNUSED: Unused
+ * @WLAN_LOG_REASON_COMMAND_UNSUCCESSFUL: Command response status from FW
+ * is error
  * @WLAN_LOG_REASON_ROAM_FAIL: Driver initiated roam has failed
  * @WLAN_LOG_REASON_THREAD_STUCK: Monitor Health of host threads and report
  * fatal event if some thread is stuck
  * @WLAN_LOG_REASON_DATA_STALL: Unable to send/receive data due to low resource
  * scenario for a prolonged period
  * @WLAN_LOG_REASON_SME_COMMAND_STUCK: SME command is stuck in SME active queue
+ * @WLAN_LOG_REASON_ZERO_SCAN_RESULTS: Full scan resulted in zero scan results
  * @WLAN_LOG_REASON_QUEUE_FULL: Defer queue becomes full for a prolonged period
  * @WLAN_LOG_REASON_POWER_COLLAPSE_FAIL: Unable to allow apps power collapse
  * for a prolonged period
+ * @WLAN_LOG_REASON_SSR_FAIL: Unable to gracefully complete SSR
+ * @WLAN_LOG_REASON_DISCONNECT_FAIL: Disconnect from Supplicant is not
+ * successful
+ * @WLAN_LOG_REASON_CLEAN_UP_FAIL: Clean up of  TDLS or Pre-Auth Sessions
+ * not successful
  * @WLAN_LOG_REASON_MALLOC_FAIL: Memory allocation Fails
  * @WLAN_LOG_REASON_VOS_MSG_UNDER_RUN: VOS Core runs out of message wrapper
- * @WLAN_LOG_REASON_IOCTL: Initiated by IOCTL
- * @WLAN_LOG_REASON_CODE_FRAMEWORK: Initiated by framework
- * @WLAN_LOG_REASON_DEL_BSS_STA_FAIL: DEL BSS/STA rsp is failure
- * @WLAN_LOG_REASON_ADD_BSS_STA_FAIL: ADD BSS/STA rsp is failure
- * @WLAN_LOG_REASON_HDD_TIME_OUT: Wait for event Timeout in HDD layer
- * @WLAN_LOG_REASON_MGMT_FRAME_TIMEOUT:Management frame timedout
- * @WLAN_LOG_REASON_SME_OUT_OF_CMD_BUFL sme out of cmd buffer
- * @WLAN_LOG_REASON_NO_SCAN_RESULTS: no scan results to report from HDD
+ * @WLAN_LOG_REASON_MSG_POST_FAIL: Unable to post msg
+ *
  * This enum contains the different reason codes for bug report
- * @WLAN_LOG_REASON_SCAN_NOT_ALLOWED: scan not allowed due to connection states
  */
 enum log_event_host_reason_code {
 	WLAN_LOG_REASON_CODE_UNUSED,
+	WLAN_LOG_REASON_COMMAND_UNSUCCESSFUL,
 	WLAN_LOG_REASON_ROAM_FAIL,
 	WLAN_LOG_REASON_THREAD_STUCK,
 	WLAN_LOG_REASON_DATA_STALL,
 	WLAN_LOG_REASON_SME_COMMAND_STUCK,
+	WLAN_LOG_REASON_ZERO_SCAN_RESULTS,
 	WLAN_LOG_REASON_QUEUE_FULL,
 	WLAN_LOG_REASON_POWER_COLLAPSE_FAIL,
+	WLAN_LOG_REASON_SSR_FAIL,
+	WLAN_LOG_REASON_DISCONNECT_FAIL,
+	WLAN_LOG_REASON_CLEAN_UP_FAIL,
 	WLAN_LOG_REASON_MALLOC_FAIL,
 	WLAN_LOG_REASON_VOS_MSG_UNDER_RUN,
-	WLAN_LOG_REASON_IOCTL,
-	WLAN_LOG_REASON_CODE_FRAMEWORK,
-	WLAN_LOG_REASON_DEL_BSS_STA_FAIL,
-	WLAN_LOG_REASON_ADD_BSS_STA_FAIL,
-	WLAN_LOG_REASON_HDD_TIME_OUT,
-	WLAN_LOG_REASON_MGMT_FRAME_TIMEOUT,
-	WLAN_LOG_REASON_SME_OUT_OF_CMD_BUF,
-	WLAN_LOG_REASON_NO_SCAN_RESULTS,
-	WLAN_LOG_REASON_STALE_SESSION_FOUND,
-	WLAN_LOG_REASON_SCAN_NOT_ALLOWED,
+	WLAN_LOG_REASON_MSG_POST_FAIL,
 };
-
 
 /**
  * enum userspace_log_level - Log level at userspace
@@ -290,7 +276,7 @@ enum wifi_driver_log_level {
  * @RING_ID_WAKELOCK:         Power events ring id
  * @RING_ID_CONNECTIVITY:     Connectivity event ring id
  * @RING_ID_PER_PACKET_STATS: Per packet statistic ring id
- * @RING_ID_DRIVER_DEBUG:     Driver debug messages ring id
+ * @RIND_ID_DRIVER_DEBUG:     Driver debug messages ring id
  * @RING_ID_FIRMWARE_DEBUG:   Firmware debug messages ring id
  *
  * This enum has the ring id values of logging rings
@@ -299,16 +285,9 @@ enum wifi_logging_ring_id {
 	RING_ID_WAKELOCK,
 	RING_ID_CONNECTIVITY,
 	RING_ID_PER_PACKET_STATS,
-	RING_ID_DRIVER_DEBUG,
+	RIND_ID_DRIVER_DEBUG,
 	RING_ID_FIRMWARE_DEBUG,
 };
-
-/* vendor element ID */
-#define IE_EID_VENDOR        (221) /* 0xDD */
-#define IE_LEN_SIZE          (1)
-#define IE_EID_SIZE          (1)
-/* Minimum size of vendor IE = 3 bytes of oui_data + 1 byte of data */
-#define IE_VENDOR_OUI_SIZE   (4)
 
 // -------------------------------------------------------------------
 // Change channel generic scheme
@@ -374,6 +353,9 @@ typedef struct sLimTimers
 
     // CNF_WAIT timer
     TX_TIMER            *gpLimCnfWaitTimer;
+
+    // Send Disassociate frame threshold parameters
+    TX_TIMER            gLimSendDisassocFrameThresholdTimer;
 
     TX_TIMER       gLimAddtsRspTimer;   // max wait for a response
 
@@ -536,8 +518,6 @@ typedef struct sAniSirLim
     tANI_U8 abortScan;
     tLimScanChnInfo scanChnInfo;
 
-    struct lim_scan_channel_status scan_channel_status;
-
     //////////////////////////////////////     SCAN/LEARN RELATED START ///////////////////////////////////////////
     tSirMacAddr         gSelfMacAddr;   //added for BT-AMP Support
 
@@ -600,8 +580,6 @@ typedef struct sAniSirLim
     /// Variable to keep track of number of currently associated STAs
     tANI_U16  gLimNumOfAniSTAs;      // count of ANI peers
     tANI_U16  gLimAssocStaLimit;
-    uint16_t  glim_assoc_sta_limit_ap;
-    uint16_t  glim_assoc_sta_limit_go;
 
     // Heart-Beat interval value
     tANI_U32   gLimHeartBeatCount;
@@ -851,6 +829,10 @@ typedef struct sAniSirLim
     // Place holder for Pre-authentication node list
     struct tLimPreAuthNode *  pLimPreAuthList;
 
+    // Send Disassociate frame threshold parameters
+    tANI_U16            gLimDisassocFrameThreshold;
+    tANI_U16            gLimDisassocFrameCredit;
+
     // Assoc or ReAssoc Response Data/Frame
     void                *gLimAssocResponseData;
 
@@ -998,7 +980,6 @@ tLimMlmOemDataRsp       *gpLimMlmOemDataRsp;
     tSirRemainOnChnReq  *gpLimRemainOnChanReq; //hold remain on chan request in this buf
     vos_list_t  gLimMgmtFrameRegistratinQueue;
     tANI_U32    mgmtFrameSessionId;
-    uint32_t tdls_frm_session_id;
     tSirBackgroundScanMode gLimBackgroundScanMode;
 
 #if  defined (WLAN_FEATURE_VOWIFI_11R) || defined (FEATURE_WLAN_ESE) || defined(FEATURE_WLAN_LFR)
@@ -1008,6 +989,7 @@ tLimMlmOemDataRsp       *gpLimMlmOemDataRsp;
     tLimDisassocDeauthCnfReq limDisassocDeauthCnfReq;
     tANI_U8 deferredMsgCnt;
     tSirDFSChannelList    dfschannelList;
+    tANI_U8 deauthMsgCnt;
     tANI_U8 gLimIbssStaLimit;
 
     /* Number of channel switch IEs sent so far */
@@ -1016,6 +998,8 @@ tLimMlmOemDataRsp       *gpLimMlmOemDataRsp;
     tANI_U8 fOffloadScanPending; /*Flag to track offload scan */
     tANI_U8 fOffloadScanP2PSearch; /*Flag to track the p2p search */
     tANI_U8 fOffloadScanP2PListen; /*Flag to track the p2p listen */
+    /*Filter out P2P result if not P2P scan/listen */
+    tANI_U8 offload_scan_filter_p2p_result;
     tANI_U8 probeCounter;
     tANI_U8 maxProbe;
     uint8_t retry_packet_cnt;
@@ -1086,7 +1070,6 @@ typedef struct sMacOpenParameters
  */
     tANI_U8 olIniInfo;
     v_BOOL_t ssdp;
-    bool enable_mc_list;
     bool enable_bcst_ptrn;
     /*
      * DFS Phyerror Filtering offload status from ini
@@ -1128,28 +1111,13 @@ typedef struct sMacOpenParameters
 
     bool      tx_chain_mask_cck;
     uint16_t  self_gen_frm_pwr;
-    bool keep_dwell_time_passive;
 #ifdef WLAN_FEATURE_LPSS
     bool is_lpass_enabled;
 #endif
 #ifdef WLAN_FEATURE_NAN
     bool is_nan_enabled;
 #endif
-#ifdef WLAN_FEATURE_TSF_PLUS
-    bool is_ptp_enabled;
-#endif
     uint16_t  max_mgmt_tx_fail_count;
-    bool force_target_assert_enabled;
-    uint16_t pkt_bundle_timer_value;
-    uint16_t pkt_bundle_size;
-#ifdef QCA_SUPPORT_TXRX_DRIVER_TCP_DEL_ACK
-    uint8_t  del_ack_enable;
-    uint16_t del_ack_timer_value;
-    uint16_t del_ack_pkt_count;
-#endif
-    bool bpf_packet_filter_enable;
-
-    struct ol_tx_sched_wrr_ac_specs_t ac_specs[OL_TX_NUM_WMM_AC];
 } tMacOpenParameters;
 
 typedef struct sHalMacStartParameters
@@ -1218,6 +1186,7 @@ typedef struct sAniSirGlobal
     tOemDataStruct oemData;
 #endif
     tPmcInfo     pmc;
+    tSmeBtcInfo  btc;
 
     tCcm ccm;
 
@@ -1281,23 +1250,9 @@ typedef struct sAniSirGlobal
     bool per_band_chainmask_supp;
     struct vdev_type_nss vdev_type_nss_2g;
     struct vdev_type_nss vdev_type_nss_5g;
-    uint8_t user_configured_nss;
     t_auth_ack_status auth_ack_status;
     bool first_scan_done;
     int8_t first_scan_bucket_threshold;
-    sir_mgmt_frame_ind_callback mgmt_frame_ind_cb;
-    sir_p2p_ack_ind_callback p2p_ack_ind_cb;
-    bool snr_monitor_enabled;
-    /* channel information callback */
-    void (*chan_info_cb)(struct scan_chan_info *chan_info);
-    uint8_t  sub20_config_info;
-    uint8_t  sub20_channelwidth;
-    uint8_t  sub20_dynamic_channelwidth;
-    uint8_t  sta_sub20_current_channelwidth;
-    bool     sta_change_cc_via_beacon;
-    bool max_power_cmd_pending;
-    uint32_t sta_auth_retries_for_code17;
-    uint32_t rx_packet_drop_counter;
 } tAniSirGlobal;
 
 typedef enum

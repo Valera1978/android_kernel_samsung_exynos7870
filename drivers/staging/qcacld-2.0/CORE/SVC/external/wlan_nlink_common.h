@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -98,13 +98,6 @@
 #define WLAN_SVC_WLAN_TP_IND        0x109
 #define WLAN_SVC_RPS_ENABLE_IND     0x10A
 #define WLAN_SVC_WLAN_TP_TX_IND     0x10B
-#define WLAN_SVC_WLAN_AUTO_SHUTDOWN_CANCEL_IND 0x10C
-#define WLAN_SVC_WLAN_RADIO_INDEX 0x10D
-#define WLAN_SVC_FW_SHUTDOWN_IND  0x10E
-/* Message for indicating SSR failure, currently, it's only supported
- * by 3rd party tools, and is not processed in wlan-service/scm.
- */
-#define WLAN_SVC_SSR_FAIL_IND     0x110
 
 #define WLAN_SVC_MAX_SSID_LEN    32
 #define WLAN_SVC_MAX_BSSID_LEN   6
@@ -145,18 +138,6 @@ typedef struct sAniHdr {
    unsigned short type;
    unsigned short length;
 } tAniHdr, tAniMsgHdr;
-
-typedef struct sAniNlMsg {
-    struct  nlmsghdr nlh;             // Netlink Header
-    int radio;                        // unit number of the radio
-    tAniHdr wmsg;                     // Airgo Message Header
-} tAniNlHdr;
-
-struct radio_index_tlv {
-    unsigned short type;
-    unsigned short length;
-    int radio;
-};
 
 struct wlan_status_data {
    uint8_t lpss_support;
@@ -226,16 +207,5 @@ enum wlan_tp_level {
         WLAN_SVC_TP_MEDIUM,
         WLAN_SVC_TP_HIGH,
 };
-#ifdef WLAN_FEATURE_SAP_TO_FOLLOW_STA_CHAN
-typedef enum sta_sap_notifications
-{
-    STA_NOTIFY_DISCONNECTED,
-    STA_NOTIFY_CONNECTED,
-    STA_NOTIFY_CSA,
-}sta_sap_notifications;
 
-struct wlan_sap_csa_info {
-   uint32_t sta_channel;
-};
-#endif//#ifdef WLAN_FEATURE_SAP_TO_FOLLOW_STA_CHAN
 #endif //WLAN_NLINK_COMMON_H__

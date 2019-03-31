@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -516,8 +516,6 @@ void
 limSetEdcaBcastACMFlag(tpAniSirGlobal pMac, tANI_U32 ac, tANI_U32 acmFlag)
 {
     tpPESession psessionEntry = &pMac->lim.gpSession[0];
-    if (ac >= MAX_NUM_AC)
-        return;
     psessionEntry->gLimEdcaParamsBC[ac].aci.acm = (tANI_U8)acmFlag;
     psessionEntry->gLimEdcaParamSetCount++;
     schSetFixedBeaconFields(pMac,psessionEntry);
@@ -935,7 +933,7 @@ dump_lim_send_SM_Power_Mode( tpAniSirGlobal pMac, tANI_U32 arg1, tANI_U32 arg2, 
 static char *
 dump_lim_addba_req( tpAniSirGlobal pMac, tANI_U32 arg1, tANI_U32 arg2, tANI_U32 arg3, tANI_U32 arg4, char *p)
 {
-  tSirRetStatus status= eSIR_SUCCESS;
+  tSirRetStatus status;
   tpDphHashNode pSta;
   tpPESession psessionEntry = &pMac->lim.gpSession[0];
 
@@ -953,6 +951,7 @@ dump_lim_addba_req( tpAniSirGlobal pMac, tANI_U32 arg1, tANI_U32 arg2, tANI_U32 
   }
   else
   {
+    status = limPostMlmAddBAReq( pMac, pSta, (tANI_U8) arg2, (tANI_U16) arg3,psessionEntry);
     p += log_sprintf( pMac, p,
         "\n%s: Attempted to send an ADDBA Req to STA Index %d, for TID %d. Send Status = %s\n",
         __func__,
@@ -967,7 +966,7 @@ dump_lim_addba_req( tpAniSirGlobal pMac, tANI_U32 arg1, tANI_U32 arg2, tANI_U32 
 static char *
 dump_lim_delba_req( tpAniSirGlobal pMac, tANI_U32 arg1, tANI_U32 arg2, tANI_U32 arg3, tANI_U32 arg4, char *p)
 {
-tSirRetStatus status = eSIR_SUCCESS;
+tSirRetStatus status;
 tpDphHashNode pSta;
   tpPESession psessionEntry = &pMac->lim.gpSession[0];
 
@@ -982,6 +981,7 @@ tpDphHashNode pSta;
   }
   else
   {
+    status = limPostMlmDelBAReq( pMac, pSta, (tANI_U8) arg2, (tANI_U8) arg3, (tANI_U16) arg4 ,psessionEntry);
     p += log_sprintf( pMac, p,
         "\n%s: Attempted to send a DELBA Ind to STA Index %d, "
         "as the BA \"%s\" for TID %d, with Reason code %d. "
@@ -1816,7 +1816,7 @@ dump_lim_ft_event( tpAniSirGlobal pMac, tANI_U32 arg1, tANI_U32 arg2, tANI_U32 a
             p += log_sprintf( pMac, p, "%s: Session %02x %02x %02x\n", __func__,
                   psessionEntry->bssId[0],
                   psessionEntry->bssId[1], psessionEntry->bssId[2]);
-            p += log_sprintf( pMac, p, "%s: Session %02x %02x %02x %pK\n",
+            p += log_sprintf( pMac, p, "%s: Session %02x %02x %02x %p\n",
                   __func__,
                   pftPreAuthReq->currbssId[0],
                   pftPreAuthReq->currbssId[1],

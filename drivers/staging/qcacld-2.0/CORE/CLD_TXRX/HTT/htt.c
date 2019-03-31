@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2014-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011, 2014-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -242,7 +242,6 @@ htt_attach(
 
     HTT_TX_MUTEX_INIT(&pdev->htt_tx_mutex);
     HTT_TX_NBUF_QUEUE_MUTEX_INIT(pdev);
-    HTT_TX_MUTEX_INIT(&pdev->credit_mutex);
 
     /* pre-allocate some HTC_PACKET objects */
     for (i = 0; i < HTT_HTC_PKT_POOL_INIT_SIZE; i++) {
@@ -389,17 +388,9 @@ htt_attach_target(htt_pdev_handle pdev)
     return status;
 }
 
-void htt_htc_detach(struct htt_pdev_t *pdev)
-{
-    htc_disconnect_service(pdev->htc_endpoint);
-    return;
-}
-
-
 void
 htt_detach(htt_pdev_handle pdev)
 {
-    htt_htc_detach(pdev);
     htt_rx_detach(pdev);
     htt_tx_detach(pdev);
     htt_htc_pkt_pool_free(pdev);
@@ -408,7 +399,6 @@ htt_detach(htt_pdev_handle pdev)
 #endif
     HTT_TX_MUTEX_DESTROY(&pdev->htt_tx_mutex);
     HTT_TX_NBUF_QUEUE_MUTEX_DESTROY(pdev);
-    HTT_TX_MUTEX_DESTROY(&pdev->credit_mutex);
 #ifdef DEBUG_RX_RING_BUFFER
     if (pdev->rx_buff_list)
         adf_os_mem_free(pdev->rx_buff_list);
@@ -461,8 +451,7 @@ htt_htc_attach(struct htt_pdev_t *pdev)
      * TODO:Conditional disabling will be removed once firmware
      * with reduced tx completion is pushed into release builds.
      */
-    if ((!pdev->cfg.default_tx_comp_req) ||
-            ol_cfg_is_ptp_enabled(pdev->ctrl_pdev)) {
+    if (!pdev->cfg.default_tx_comp_req) {
        connect.ConnectionFlags |= HTC_CONNECT_FLAGS_DISABLE_CREDIT_FLOW_CTRL;
     }
 #else
@@ -536,12 +525,12 @@ htt_display(htt_pdev_handle pdev, int indent)
         indent+4, " ",
         pdev->rx_ring.size,
         pdev->rx_ring.fill_level);
-    adf_os_print("%*sat %pK (%#x paddr)\n", indent+8, " ",
+    adf_os_print("%*sat %p (%#x paddr)\n", indent+8, " ",
         pdev->rx_ring.buf.paddrs_ring,
         pdev->rx_ring.base_paddr);
-    adf_os_print("%*snetbuf ring @ %pK\n", indent+8, " ",
+    adf_os_print("%*snetbuf ring @ %p\n", indent+8, " ",
         pdev->rx_ring.buf.netbufs_ring);
-    adf_os_print("%*sFW_IDX shadow register: vaddr = %pK, paddr = %#x\n",
+    adf_os_print("%*sFW_IDX shadow register: vaddr = %p, paddr = %#x\n",
         indent+8, " ",
         pdev->rx_ring.alloc_idx.vaddr,
         pdev->rx_ring.alloc_idx.paddr);
@@ -666,24 +655,4 @@ void htt_clear_bundle_stats(htt_pdev_handle pdev)
     HTCClearBundleStats(pdev->htc_pdev);
 }
 #endif
-
-/**
- * htt_mark_first_wakeup_packet() - set flag to indicate that
- *    fw is compatible for marking first packet after wow wakeup
- * @pdev: pointer to htt pdev
- * @value: 1 for enabled/ 0 for disabled
- *
- * Return: None
- */
-void htt_mark_first_wakeup_packet(htt_pdev_handle pdev,
-			uint8_t value)
-{
-	if (!pdev) {
-		adf_os_print("%s: htt pdev is NULL", __func__);
-		return;
-	}
-
-	pdev->cfg.is_first_wakeup_packet = value;
-}
-
 

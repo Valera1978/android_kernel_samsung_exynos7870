@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -33,9 +33,9 @@
 #include "epping_main.h"
 
 /* HTC Control message receive timeout msec */
-#define HTC_CONTROL_RX_TIMEOUT     5000
+#define HTC_CONTROL_RX_TIMEOUT     3000
 
-#ifdef WLAN_DEBUG
+#ifdef DEBUG
 void DebugDumpBytes(A_UCHAR *buffer, A_UINT16 length, char *pDescription)
 {
     A_CHAR stream[60];
@@ -104,17 +104,14 @@ static void DoRecvCompletion(HTC_ENDPOINT     *pEndpoint,
             /* using legacy EpRecv */
             while (!HTC_QUEUE_EMPTY(pQueueToIndicate)) {
                 pPacket = HTC_PACKET_DEQUEUE(pQueueToIndicate);
-                LOCK_HTC_ENDPOINT_RX(pEndpoint);
                 if (pEndpoint->EpCallBacks.EpRecv == NULL) {
-                    AR_DEBUG_PRINTF(ATH_DEBUG_ERR, ("HTC ep %d has NULL recv callback on packet %pK\n",
+                    AR_DEBUG_PRINTF(ATH_DEBUG_ERR, ("HTC ep %d has NULL recv callback on packet %p\n",
                             pEndpoint->Id, pPacket));
-                    UNLOCK_HTC_ENDPOINT_RX(pEndpoint);
                     continue;
                 }
-                AR_DEBUG_PRINTF(ATH_DEBUG_RECV, ("HTC calling ep %d recv callback on packet %pK\n",
+                AR_DEBUG_PRINTF(ATH_DEBUG_RECV, ("HTC calling ep %d recv callback on packet %p\n",
                         pEndpoint->Id, pPacket));
                 pEndpoint->EpCallBacks.EpRecv(pEndpoint->EpCallBacks.pContext, pPacket);
-                UNLOCK_HTC_ENDPOINT_RX(pEndpoint);
             }
         }
 
@@ -556,7 +553,7 @@ void HTCFlushRxHoldQueue(HTC_TARGET *target, HTC_ENDPOINT *pEndpoint)
         UNLOCK_HTC_RX(target);
         pPacket->Status = A_ECANCELED;
         pPacket->ActualLength = 0;
-        AR_DEBUG_PRINTF(ATH_DEBUG_RECV, ("  Flushing RX packet:%pK, length:%d, ep:%d \n",
+        AR_DEBUG_PRINTF(ATH_DEBUG_RECV, ("  Flushing RX packet:%p, length:%d, ep:%d \n",
                 pPacket, pPacket->BufferLength, pPacket->Endpoint));
         INIT_HTC_PACKET_QUEUE_AND_ADD(&container,pPacket);
             /* give the packet back */
@@ -585,8 +582,7 @@ A_STATUS HTCWaitRecvCtrlMessage(HTC_TARGET *target)
     /* Wait for BMI request/response transaction to complete */
     if(!adf_os_wait_for_completion_timeout(&target->CtrlResponseValid,
         adf_os_msecs_to_ticks(HTC_CONTROL_RX_TIMEOUT))) {
-        if(hif_set_target_reset(target->hif_dev))
-            VOS_BUG(0);
+        ADF_BUG(0);
         return A_ERROR;
     }
 

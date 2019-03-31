@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2016,2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -147,7 +147,6 @@ typedef struct _HTC_ENDPOINT {
     HTC_ENDPOINT_STATS          EndPointStats;          /* endpoint statistics */
 #endif
     A_BOOL                      TxCreditFlowEnabled;
-    adf_os_spinlock_t           htc_endpoint_rx_lock;
 } HTC_ENDPOINT;
 
 #ifdef HTC_EP_STAT_PROFILING
@@ -207,15 +206,6 @@ typedef struct _HTC_TARGET {
     A_UINT32                    rx_bundle_stats[HTC_MAX_MSG_PER_BUNDLE_RX];
     A_UINT32                    tx_bundle_stats[HTC_MAX_MSG_PER_BUNDLE_TX];
 #endif
-    /*
-    * This flag is from the mboxping tool. It indicates that we cannot drop it.
-    * Besides, nodrop pkts have higher priority than normal pkts.
-    */
-    A_BOOL                      is_nodrop_pkt;
-#ifdef HIF_SDIO
-    /* RX: enable bundle different SDIO block frames */
-    A_BOOL                      enable_b2b;
-#endif
 } HTC_TARGET;
 
 #define HTC_ENABLE_BUNDLE(target) (target->MaxMsgsPerHTCBundle > 1)
@@ -236,8 +226,6 @@ typedef struct _HTC_TARGET {
 #define UNLOCK_HTC_TX(t)        adf_os_spin_unlock_bh(&(t)->HTCTxLock);
 #define LOCK_HTC_CREDIT(t)      adf_os_spin_lock_bh(&(t)->HTCCreditLock);
 #define UNLOCK_HTC_CREDIT(t)    adf_os_spin_unlock_bh(&(t)->HTCCreditLock);
-#define LOCK_HTC_ENDPOINT_RX(t) adf_os_spin_lock_bh(&(t)->htc_endpoint_rx_lock);
-#define UNLOCK_HTC_ENDPOINT_RX(t) adf_os_spin_unlock_bh(&(t)->htc_endpoint_rx_lock);
 
 #define GET_HTC_TARGET_FROM_HANDLE(hnd) ((HTC_TARGET *)(hnd))
 

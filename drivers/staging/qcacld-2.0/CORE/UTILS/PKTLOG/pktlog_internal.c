@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -35,7 +35,6 @@
 #include "pktlog_ac_i.h"
 #include "wma_api.h"
 #include "wlan_logging_sock_svc.h"
-#include "ol_txrx.h"
 
 #define TX_DESC_ID_LOW_MASK	0xffff
 #define TX_DESC_ID_LOW_SHIFT	0
@@ -171,6 +170,16 @@ pktlog_getbuf(struct ol_pktlog_dev_t *pl_dev,
 		pktlog_getbuf_intsafe(&plarg);
 		PKTLOG_UNLOCK(pl_info);
 	}
+
+	/*
+	 * We do not want to do this packet stats related processing when
+	 * packet log tool is run. i.e., we want this processing to be
+	 * done only when start logging command of packet stats is initiated.
+	 */
+	if (vos_get_ring_log_level(RING_ID_PER_PACKET_STATS) ==
+							WLAN_LOG_LEVEL_ACTIVE)
+		pktlog_check_threshold(pl_info, log_size);
+
 	return plarg.buf;
 }
 
@@ -209,14 +218,6 @@ static void process_ieee_hdr(void *data)
 	}
 }
 
-static inline uint16_t get_desc_pool_size(struct ol_txrx_pdev_t *txrx_pdev)
-{
-	if (txrx_pdev->cfg.is_high_latency)
-		return ol_tx_desc_pool_size_hl(txrx_pdev->ctrl_pdev);
-	else
-		return ol_cfg_target_tx_credit(txrx_pdev->ctrl_pdev);
-}
-
 A_STATUS
 process_tx_info(struct ol_txrx_pdev_t *txrx_pdev,
 		void *data)
@@ -229,8 +230,6 @@ process_tx_info(struct ol_txrx_pdev_t *txrx_pdev,
 	struct ath_pktlog_hdr pl_hdr;
 	struct ath_pktlog_info *pl_info;
 	uint32_t *pl_tgt_hdr;
-	struct ol_fw_data *fw_data;
-	uint32_t len;
 
 	if (!txrx_pdev) {
 		printk("Invalid pdev in %s\n", __func__);
@@ -238,27 +237,7 @@ process_tx_info(struct ol_txrx_pdev_t *txrx_pdev,
 	}
 	adf_os_assert(txrx_pdev->pl_dev);
 	adf_os_assert(data);
-
-	fw_data = (struct ol_fw_data *)data;
-	len = fw_data->len;
-	if (len < (sizeof(uint32_t) *
-		   (ATH_PKTLOG_HDR_FLAGS_OFFSET + 1)) ||
-		len < (sizeof(uint32_t) *
-		       (ATH_PKTLOG_HDR_MISSED_CNT_OFFSET + 1)) ||
-		len < (sizeof(uint32_t) *
-		       (ATH_PKTLOG_HDR_LOG_TYPE_OFFSET + 1)) ||
-		len < (sizeof(uint32_t) *
-		       (ATH_PKTLOG_HDR_SIZE_OFFSET + 1)) ||
-		len < (sizeof(uint32_t) *
-		       (ATH_PKTLOG_HDR_TIMESTAMP_OFFSET + 1))) {
-		adf_os_print("Invalid msdu len in %s\n", __func__);
-		adf_os_assert(0);
-		return A_ERROR;
-	}
-
 	pl_dev = txrx_pdev->pl_dev;
-
-	data = fw_data->data;
 
 	pl_tgt_hdr = (uint32_t *)data;
 	/*
@@ -281,11 +260,6 @@ process_tx_info(struct ol_txrx_pdev_t *txrx_pdev,
 
 	pl_info = pl_dev->pl_info;
 
-	if (sizeof(struct ath_pktlog_hdr) + pl_hdr.size > len) {
-		adf_os_assert(0);
-		return A_ERROR;
-	}
-
 	if (pl_hdr.log_type == PKTLOG_TYPE_TX_FRM_HDR) {
 		/* Valid only for the TX CTL */
 		process_ieee_hdr(data + sizeof(pl_hdr));
@@ -295,8 +269,6 @@ process_tx_info(struct ol_txrx_pdev_t *txrx_pdev,
 		A_UINT32 desc_id = (A_UINT32)
 				*((A_UINT32 *)(data + sizeof(pl_hdr)));
 		A_UINT32 vdev_id = desc_id;
-		struct ol_tx_desc_t *tx_desc;
-		adf_nbuf_t netbuf;
 
 		/* if the pkt log msg is for the bcn frame the vdev id
 		 * is piggybacked in desc_id and the MSB of the desc ID
@@ -315,18 +287,10 @@ process_tx_info(struct ol_txrx_pdev_t *txrx_pdev,
 				adf_os_mem_free(data);
 			}
 		} else {
-			tx_desc = ol_tx_desc_find_check(txrx_pdev, desc_id);
-			if (tx_desc == NULL) {
-				adf_os_print("%s: invalid desc_id(%u), ignore it.\n",
-					__func__,
-					desc_id);
-				return A_ERROR;
-			}
-
-			adf_os_assert(tx_desc);
-			netbuf = tx_desc->netbuf;
-			if (netbuf)
-				process_ieee_hdr(adf_nbuf_data(netbuf));
+			/*
+			 * TODO: get the hdr content for mgmt frames from
+			 * Tx mgmt desc pool
+			 */
 		}
 	}
 
@@ -350,20 +314,12 @@ process_tx_info(struct ol_txrx_pdev_t *txrx_pdev,
 		 */
 		txctl_log.priv.frm_hdr = frm_hdr;
 		adf_os_assert(txctl_log.priv.txdesc_ctl);
-		adf_os_assert(pl_hdr.size < sizeof(txctl_log.priv.txdesc_ctl));
-		pl_hdr.size = (pl_hdr.size > sizeof(txctl_log.priv.txdesc_ctl))
-			       ? sizeof(txctl_log.priv.txdesc_ctl) :
-			       pl_hdr.size;
 		adf_os_mem_copy((void *)&txctl_log.priv.txdesc_ctl,
 				((void *)data + sizeof(struct ath_pktlog_hdr)),
 				pl_hdr.size);
 		adf_os_assert(txctl_log.txdesc_hdr_ctl);
 		adf_os_mem_copy(txctl_log.txdesc_hdr_ctl, &txctl_log.priv,
 				sizeof(txctl_log.priv));
-
-		pl_hdr.size = log_size;
-		vos_pkt_stats_to_logger_thread(&pl_hdr, NULL,
-						txctl_log.txdesc_hdr_ctl);
 		/* Add Protocol information and HT specific information */
 	}
 
@@ -377,8 +333,6 @@ process_tx_info(struct ol_txrx_pdev_t *txrx_pdev,
 		adf_os_mem_copy(txstat_log.ds_status,
 				((void *)data + sizeof(struct ath_pktlog_hdr)),
 				pl_hdr.size);
-		vos_pkt_stats_to_logger_thread(&pl_hdr, NULL,
-						txstat_log.ds_status);
 	}
 
 	if (pl_hdr.log_type == PKTLOG_TYPE_TX_MSDU_ID) {
@@ -421,19 +375,8 @@ process_tx_info(struct ol_txrx_pdev_t *txrx_pdev,
 					     >> TX_DESC_ID_HIGH_SHIFT);
 				msdu_id += 1;
 			}
-			if (tx_desc_id >= get_desc_pool_size(txrx_pdev)) {
-				adf_os_print("%s: drop due to invalid msdu id = %x\n",
-						__func__, tx_desc_id);
-				return A_ERROR;
-			}
-
-			tx_desc = ol_tx_desc_find_check(txrx_pdev, tx_desc_id);
-			if (!tx_desc) {
-				adf_os_print("%s: ignore invalid desc_id(%u)\n",
-						__func__, tx_desc_id);
-				return A_ERROR;
-			}
-
+			tx_desc = ol_tx_desc_find(txrx_pdev, tx_desc_id);
+			adf_os_assert(tx_desc);
 			netbuf = tx_desc->netbuf;
 			htt_tx_desc = (uint32_t *) tx_desc->htt_tx_desc;
 			adf_os_assert(htt_tx_desc);
@@ -442,7 +385,7 @@ process_tx_info(struct ol_txrx_pdev_t *txrx_pdev,
 
 			if (len < (2 * IEEE80211_ADDR_LEN)) {
 				adf_os_print("TX frame does not have a valid address\n");
-				return A_ERROR;
+				return -1;
 			}
 			/* Adding header information for the TX data frames */
 			vdev_id = (u_int8_t)(*(htt_tx_desc +
@@ -479,8 +422,6 @@ process_tx_info(struct ol_txrx_pdev_t *txrx_pdev,
 				sizeof(pl_msdu_info.priv.msdu_id_info));
 		adf_os_mem_copy(pl_msdu_info.ath_msdu_info, &pl_msdu_info.priv,
 				sizeof(pl_msdu_info.priv));
-		vos_pkt_stats_to_logger_thread(&pl_hdr, NULL,
-						pl_msdu_info.ath_msdu_info);
 	}
 	return A_OK;
 }
@@ -530,8 +471,6 @@ process_rx_info_remote(void *pdev, adf_nbuf_t amsdu)
 		adf_os_mem_copy(rxstat_log.rx_desc, (void *)rx_desc +
 				sizeof(struct htt_host_fw_desc_base),
 				pl_hdr.size);
-		vos_pkt_stats_to_logger_thread(&pl_hdr, NULL,
-						rxstat_log.rx_desc);
 		msdu = adf_nbuf_next(msdu);
 	}
 	return A_OK;
@@ -574,7 +513,7 @@ process_rx_info(void *pdev, void *data)
 	adf_os_mem_copy(rxstat_log.rx_desc,
 			(void *)data + sizeof(struct ath_pktlog_hdr),
 			pl_hdr.size);
-	vos_pkt_stats_to_logger_thread(&pl_hdr, NULL, rxstat_log.rx_desc);
+
 	return A_OK;
 }
 
@@ -630,7 +569,7 @@ process_rate_find(void *pdev, void *data)
 	adf_os_mem_copy(rcf_log.rcFind,
 			((char *)data + sizeof(struct ath_pktlog_hdr)),
 			pl_hdr.size);
-	vos_pkt_stats_to_logger_thread(&pl_hdr, NULL, rcf_log.rcFind);
+
 	return A_OK;
 }
 
@@ -684,7 +623,6 @@ process_rate_update(void *pdev, void *data)
 	adf_os_mem_copy(rcu_log.txRateCtrl,
 			((char *)data + sizeof(struct ath_pktlog_hdr)),
 			pl_hdr.size);
-	vos_pkt_stats_to_logger_thread(&pl_hdr, NULL, rcu_log.txRateCtrl);
 	return A_OK;
 }
 #endif /*REMOVE_PKT_LOG*/

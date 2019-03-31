@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2014,2017-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -38,12 +38,6 @@ ol_txrx_peer_unref_delete(struct ol_txrx_peer_t *peer);
 u_int16_t
 ol_tx_desc_pool_size_hl(ol_pdev_handle ctrl_pdev);
 
-#ifdef QCA_SUPPORT_TXRX_DRIVER_TCP_DEL_ACK
-struct tcp_stream_node *ol_txrx_vdev_alloc_tcp_node(struct ol_txrx_vdev_t *vdev);
-void ol_txrx_vdev_free_tcp_node(struct ol_txrx_vdev_t *vdev,
-				struct tcp_stream_node *node);
-void ol_txrx_vdev_deinit_tcp_del_ack(struct ol_txrx_vdev_t *vdev);
-#endif
 
 #ifndef OL_TX_AVG_FRM_BYTES
 #define OL_TX_AVG_FRM_BYTES 1000
@@ -57,10 +51,6 @@ void ol_txrx_vdev_deinit_tcp_del_ack(struct ol_txrx_vdev_t *vdev);
 #define OL_TX_DESC_POOL_SIZE_MAX_HL 5000
 #endif
 
-#ifndef FW_STATS_DESC_POOL_SIZE
-#define FW_STATS_DESC_POOL_SIZE 10
-#endif
-
 #ifdef CONFIG_PER_VDEV_TX_DESC_POOL
 #define TXRX_HL_TX_FLOW_CTRL_VDEV_LOW_WATER_MARK 400
 #define TXRX_HL_TX_FLOW_CTRL_MGMT_RESERVED 100
@@ -69,17 +59,4 @@ void ol_txrx_vdev_deinit_tcp_del_ack(struct ol_txrx_vdev_t *vdev);
 #ifdef CONFIG_TX_DESC_HI_PRIO_RESERVE
 #define TXRX_HL_TX_DESC_HI_PRIO_RESERVED 20
 #endif
-
-A_STATUS
-ol_txrx_get_ll_queue_pause_bitmap(uint8_t vdev_id,
-	uint8_t *pause_bitmap, adf_os_time_t *pause_timestamp);
-int ol_txrx_fw_stats_desc_pool_init(struct ol_txrx_pdev_t *pdev,
-				    uint8_t pool_size);
-void ol_txrx_fw_stats_desc_pool_deinit(struct ol_txrx_pdev_t *pdev);
-struct ol_txrx_fw_stats_desc_t
-	*ol_txrx_fw_stats_desc_alloc(struct ol_txrx_pdev_t
-				     *pdev);
-struct ol_txrx_stats_req_internal *ol_txrx_fw_stats_desc_get_req(struct
-	ol_txrx_pdev_t *pdev, uint8_t desc_id);
-
 #endif /* _OL_TXRX__H_ */

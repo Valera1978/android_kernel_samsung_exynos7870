@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2016-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -46,6 +46,7 @@
 #include <wlan_hdd_tx_rx.h>
 #include <wniApi.h>
 #include <wlan_nlink_srv.h>
+#include <wlan_btc_svc.h>
 #include <wlan_hdd_cfg.h>
 #include <wlan_ptt_sock_svc.h>
 #include <wlan_hdd_wowl.h>
@@ -71,7 +72,7 @@ int epping_cookie_init(epping_context_t*pEpping_ctx)
    for (i = 0; i < MAX_COOKIE_SLOTS_NUM; i++) {
       pEpping_ctx->s_cookie_mem[i] =
          vos_mem_malloc(sizeof(struct epping_cookie)*MAX_COOKIE_SLOT_SIZE);
-      if (pEpping_ctx->s_cookie_mem[i] == NULL) {
+      if (pEpping_ctx->s_cookie_mem == NULL) {
          EPPING_LOG(VOS_TRACE_LEVEL_FATAL,
             "%s: no mem for cookie (idx = %d)", __func__, i);
          goto error;
@@ -236,7 +237,7 @@ static int epping_tx_thread_fn(void *data)
     int i;
    epping_poll_t *epping_poll = data;
 
-   EPPING_LOG(VOS_TRACE_LEVEL_FATAL, "%s: arg = %pK", __func__, data);
+   EPPING_LOG(VOS_TRACE_LEVEL_FATAL, "%s: arg = %p", __func__, data);
    while (!epping_poll->done) {
       down(&epping_poll->sem);
       adf_os_atomic_dec(&epping_poll->atm);
@@ -258,7 +259,7 @@ void epping_register_tx_copier(HTC_ENDPOINT_ID eid, epping_context_t *pEpping_ct
    epping_poll->eid = eid;
    epping_poll->arg = pEpping_ctx->epping_adapter;
    epping_poll->done = false;
-   EPPING_LOG(VOS_TRACE_LEVEL_FATAL, "%s: eid = %d, arg = %pK",
+   EPPING_LOG(VOS_TRACE_LEVEL_FATAL, "%s: eid = %d, arg = %p",
               __func__, eid, pEpping_ctx->epping_adapter);
    sema_init(&epping_poll->sem, 0);
    adf_os_atomic_init(&epping_poll->atm);

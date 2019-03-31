@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2016-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -296,24 +296,6 @@ VOS_STATUS vos_timer_start( vos_timer_t *timer, v_U32_t expirationTime );
   ------------------------------------------------------------------------*/
 VOS_STATUS vos_timer_stop( vos_timer_t *timer );
 
-/*--------------------------------------------------------------------------
-
-  \brief vos_timer_deinit() - De-init a vOSS Timer
-
-  The \a vos_timer_deinit() function stop (if the timer is in running state)
-  and destroy a timer.
-
-  \param timer - the timer object to be stopped
-
-  \return VOS_STATUS_SUCCESS - timer was successfully de-initialized.
-
-          VOS_STATUS_E_INVAL - The value specified by timer is invalid.
-
-          VOS_STATUS_E_FAULT  - timer is an invalid pointer.
-  \sa
-
-  ------------------------------------------------------------------------*/
-VOS_STATUS vos_timer_deinit(vos_timer_t *timer);
 
 /*--------------------------------------------------------------------------
 
@@ -347,43 +329,6 @@ v_TIME_t vos_timer_get_system_ticks( v_VOID_t );
   ------------------------------------------------------------------------*/
 v_TIME_t vos_timer_get_system_time( v_VOID_t );
 
-/**
- * vos_system_ticks() - get system ticks
- *
- * Return: system tick in jiffies
- */
-static inline vos_time_t vos_system_ticks(void)
-{
-	return __vos_system_ticks();
-}
 
-/**
- * vos_system_ticks_to_msecs() - convert system ticks into milli seconds
- * @ticks: System ticks
- *
- * Return: system tick converted into milli seconds
- */
-static inline uint32_t vos_system_ticks_to_msecs(vos_time_t ticks)
-{
-	return __vos_system_ticks_to_msecs(ticks);
-}
 
-/**
- * vos_system_time_after() - Check if a is later than b
- * @a: Time stamp value a
- * @b: Time stamp value b
- *
- * Return:
- * true if a is after b else false
- */
-static inline bool vos_system_time_after(vos_time_t a, vos_time_t b)
-{
-	return (long)(b) - (long)(a) < 0;
-}
-
-unsigned long vos_get_time_of_the_day_ms(void);
-void vos_get_time_of_the_day_in_hr_min_sec_usec(char *tbuf, int len);
-void vos_process_wd_timer(void);
-void vos_wdthread_init_timer_work(void *callbackptr);
-void vos_wdthread_flush_timer_work(void);
 #endif // #if !defined __VOSS_TIMER_H

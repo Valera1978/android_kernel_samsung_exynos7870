@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2014,2016-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -29,17 +29,12 @@
 #define TXRX_TL_SHIM_H
 
 #include <ol_txrx_osif_api.h>
-#include <ol_txrx_ctrl_api.h>
 #include <adf_os_lock.h>
 #include <adf_os_atomic.h>
-#include <vos_sched.h>
-
-/* Time(in ms) to detect DOS attack */
-#define TLSHIM_MGMT_FRAME_DETECT_DOS_TIMER 1000
 
 #ifdef FEATURE_WLAN_ESE
 typedef struct deferred_iapp_work {
-    pVosContextType pVosGCtx;
+    pVosContextType	pVosGCtx;
     adf_nbuf_t nbuf;
     struct ol_txrx_vdev_t *vdev;
     bool inUse;
@@ -112,7 +107,6 @@ struct deferred_iapp_work iapp_work;
 	ipa_uc_fw_op_cb fw_op_cb;
 	void *usr_ctxt;
 #endif /* IPA_UC_OFFLOAD */
-	WLANTL_STARxCBType rx_monitor_cb;
 };
 
 /*
@@ -130,11 +124,6 @@ VOS_STATUS tl_shim_get_vdevid(struct ol_txrx_peer_t *peer, u_int8_t *vdev_id);
 int tlshim_mgmt_roam_event_ind(void *context, u_int32_t vdev_id);
 void *tl_shim_get_vdev_by_addr(void *vos_context, uint8_t *mac_addr);
 void *tl_shim_get_vdev_by_sta_id(void *vos_context, uint8_t sta_id);
-int tlshim_get_ll_queue_pause_bitmap(uint8_t session_id,
-	uint8_t *pause_bitmap, __adf_time_t *pause_timestamp);
-
-A_STATUS tlshim_get_intra_bss_fwd_pkts_count(uint8_t session_id,
-		unsigned long *fwd_tx_packets, unsigned long *fwd_rx_packets);
 
 #ifdef QCA_SUPPORT_TXRX_VDEV_PAUSE_LL
 void tl_shim_set_peer_authorized_event(void *vos_ctx, v_U8_t session_id);
@@ -143,78 +132,4 @@ static inline void tl_shim_set_peer_authorized_event(void *vos_ctx, v_U8_t sessi
 {
 }
 #endif
-
-static inline
-void tlshim_set_bundle_require(uint8_t vdev_id, unsigned long tx_bytes,
-			uint32_t time_in_ms, uint32_t high_th, uint32_t low_th)
-{
-	ol_tx_vdev_set_bundle_require(vdev_id, tx_bytes,
-				 time_in_ms, high_th, low_th);
-}
-
-static inline void tlshim_reset_bundle_require(void)
-{
-	void *vos_ctx = vos_get_global_context(VOS_MODULE_ID_TL, NULL);
-	void *pdev;
-
-	if (!vos_ctx)
-		return;
-
-	pdev = vos_get_context(VOS_MODULE_ID_TXRX, vos_ctx);
-	if (!pdev)
-		return;
-
-	ol_tx_pdev_reset_bundle_require(pdev);
-}
-
-#ifdef QCA_SUPPORT_TXRX_DRIVER_TCP_DEL_ACK
-static inline
-void tlshim_set_driver_del_ack_enable(uint8_t vdev_id, unsigned long rx_packets,
-			uint32_t time_in_ms, uint32_t high_th, uint32_t low_th)
-{
-	ol_tx_vdev_set_driver_del_ack_enable(vdev_id, rx_packets,
-				 time_in_ms, high_th, low_th);
-}
-
-static inline void tlshim_driver_del_ack_disable(void)
-{
-	void *vos_ctx = vos_get_global_context(VOS_MODULE_ID_TL, NULL);
-	void *pdev;
-
-	if (!vos_ctx)
-		return;
-
-	pdev = vos_get_context(VOS_MODULE_ID_TXRX, vos_ctx);
-	if (!pdev)
-		return;
-
-	ol_tx_pdev_reset_driver_del_ack(pdev);
-}
-#else
-static inline
-void tlshim_set_driver_del_ack_enable(uint8_t vdev_id, unsigned long rx_packets,
-			uint32_t time_in_ms, uint32_t high_th, uint32_t low_th)
-{
-}
-
-static inline void tlshim_driver_del_ack_disable(void)
-{
-}
-#endif
-
-static inline void *tlshim_get_rxmon_cbk(void)
-{
-	void *vos_ctx = vos_get_global_context(VOS_MODULE_ID_TL, NULL);
-	struct txrx_tl_shim_ctx *tlshim;
-
-	if (!vos_ctx)
-		return NULL;
-
-	tlshim = vos_get_context(VOS_MODULE_ID_TL, vos_ctx);
-	if (tlshim)
-		return (void *)tlshim->rx_monitor_cb;
-
-	return NULL;
-}
-
 #endif

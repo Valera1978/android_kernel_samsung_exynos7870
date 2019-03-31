@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2016 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -271,7 +271,6 @@ static void hif_usb_remove(struct usb_interface *interface)
 		usb_sc->hdd_removed_wait_cnt ++;
 	}
 	atomic_set(&usb_sc->hdd_removed_processing, 1);
-	vos_set_shutdown_in_progress(VOS_MODULE_ID_HIF, TRUE);
 
 	/* disable lpm to avoid following cold reset will
 	 *cause xHCI U1/U2 timeout
@@ -286,6 +285,9 @@ static void hif_usb_remove(struct usb_interface *interface)
 	/* do cold reset */
 	HIFDiagWriteCOLDRESET(sc->hif_device);
 
+	if (usb_sc->suspend_state) {
+		hif_usb_resume(usb_sc->interface);
+	}
 	unregister_reboot_notifier(&sc->reboot_notifier);
 	usb_put_dev(interface_to_usbdev(interface));
 	if (atomic_read(&hif_usb_unload_state) ==
@@ -316,7 +318,6 @@ static void hif_usb_remove(struct usb_interface *interface)
 
 	hif_nointrs(sc);
 	HIF_USBDeviceDetached(interface, 1);
-	vos_set_shutdown_in_progress(VOS_MODULE_ID_HIF, FALSE);
 	atomic_set(&usb_sc->hdd_removed_processing, 0);
 	hif_deinit_adf_ctx(scn);
 	A_FREE(scn);
@@ -348,6 +349,22 @@ static int hif_usb_suspend(struct usb_interface *interface, pm_message_t state)
 	if (wma_check_scan_in_progress(temp_module)) {
 		printk("%s: Scan in progress. Aborting suspend\n", __func__);
 		return (-1);
+	}
+
+	/* No need to send WMI_PDEV_SUSPEND_CMDID to FW if WOW is enabled */
+	if (wma_is_wow_mode_selected(temp_module)) {
+		if (wma_enable_wow_in_fw(temp_module, 0)) {
+			pr_warn("%s[%d]: fail\n", __func__, __LINE__);
+			return -1;
+		}
+	} else if ((PM_EVENT_FREEZE & state.event) == PM_EVENT_FREEZE ||
+		(PM_EVENT_SUSPEND & state.event) == PM_EVENT_SUSPEND ||
+		(PM_EVENT_HIBERNATE & state.event) == PM_EVENT_HIBERNATE) {
+		if (wma_suspend_target
+		    (vos_get_context(VOS_MODULE_ID_WDA, vos), 0)) {
+			pr_warn("%s[%d]: fail\n", __func__, __LINE__);
+			return -1;
+		}
 	}
 
 	sc->suspend_state = 1;
@@ -382,6 +399,13 @@ static int hif_usb_resume(struct usb_interface *interface)
 	usb_hif_post_recv_transfers(&device->pipes[HIF_RX_INT_PIPE],
 				    HIF_USB_RX_BUFFER_SIZE);
 #endif
+	/* No need to send WMI_PDEV_RESUME_CMDID to FW if WOW is enabled */
+	if (!wma_is_wow_mode_selected(temp_module)) {
+		wma_resume_target(temp_module, 0);
+	} else if (wma_disable_wow_in_fw(temp_module, 0)) {
+		pr_warn("%s[%d]: fail\n", __func__, __LINE__);
+		return (-1);
+	}
 	printk("Exit:%s,Line:%d\n", __func__,__LINE__);
 	return 0;
 }
@@ -399,7 +423,6 @@ static int hif_usb_reset_resume(struct usb_interface *intf)
 
 static struct usb_device_id hif_usb_id_table[] = {
 	{USB_DEVICE_AND_INTERFACE_INFO(VENDOR_ATHR, 0x9378, 0xFF, 0xFF, 0xFF)},
-	{USB_DEVICE_AND_INTERFACE_INFO(VENDOR_ATHR, 0x9379, 0xFF, 0xFF, 0xFF)},
 	{}			/* Terminating entry */
 };
 
@@ -614,7 +637,6 @@ void hif_get_hw_info(void *ol_sc, u32 *version, u32 *revision)
 					case AR6320_REV3_VERSION:
 					case AR6320_REV3_2_VERSION:
 					case QCA9377_REV1_1_VERSION:
-					case QCA9379_REV1_VERSION:
 						hif_type = HIF_TYPE_AR6320V2;
 						target_type = TARGET_TYPE_AR6320V2;
 						break;

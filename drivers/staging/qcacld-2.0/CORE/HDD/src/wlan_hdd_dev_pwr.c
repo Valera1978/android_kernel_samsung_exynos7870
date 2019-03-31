@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -88,24 +88,6 @@ static const hdd_tmLevelAction_t thermalMigrationAction[WLAN_HDD_TM_LEVEL_MAX] =
 static bool suspend_notify_sent;
 #endif
 
-#ifdef FEATURE_WLAN_DIAG_SUPPORT
-/**
- * hdd_wlan_suspend_resume_event()- send suspend/resume state
- * @state: suspend/resume state
- *
- * This Function send send suspend resume state diag event
- *
- * Return: void.
- */
-void hdd_wlan_suspend_resume_event(uint8_t state)
-{
-	WLAN_VOS_DIAG_EVENT_DEF(suspend_state, struct vos_event_suspend);
-	vos_mem_zero(&suspend_state, sizeof(suspend_state));
-
-	suspend_state.state = state;
-	WLAN_VOS_DIAG_EVENT_REPORT(&suspend_state, EVENT_WLAN_SUSPEND_RESUME);
-}
-#endif
 
 /*----------------------------------------------------------------------------
 
@@ -136,7 +118,7 @@ void hddDevTmTxBlockTimeoutHandler(void *usrData)
    if ((NULL == staAdapater) ||
        (WLAN_HDD_ADAPTER_MAGIC != staAdapater->magic)) {
       VOS_TRACE(VOS_MODULE_ID_HDD,VOS_TRACE_LEVEL_ERROR,
-                FL("invalid Adapter %pK"), staAdapater);
+                FL("invalid Adapter %p"), staAdapater);
       VOS_ASSERT(0);
       return;
    }
@@ -152,9 +134,7 @@ void hddDevTmTxBlockTimeoutHandler(void *usrData)
    /* Resume TX flow */
 
    hddLog(LOG1, FL("Enabling queues"));
-   wlan_hdd_netif_queue_control(staAdapater,
-        WLAN_WAKE_ALL_NETIF_QUEUE,
-        WLAN_CONTROL_PATH);
+   netif_tx_wake_all_queues(staAdapater->dev);
    pHddCtx->tmInfo.qBlocked = VOS_FALSE;
    mutex_unlock(&pHddCtx->tmInfo.tmOperationLock);
 
@@ -210,15 +190,28 @@ VOS_STATUS hddDevTmRegisterNotifyCallback(hdd_context_t *pHddCtx)
 ----------------------------------------------------------------------------*/
 VOS_STATUS hddDevTmUnregisterNotifyCallback(hdd_context_t *pHddCtx)
 {
-	VOS_STATUS status;
+   VOS_STATUS vosStatus = VOS_STATUS_SUCCESS;
 
-	wcnss_unregister_thermal_mitigation(hddDevTmLevelChangedHandler);
-	status = vos_timer_deinit(&pHddCtx->tmInfo.txSleepTimer);
-	if (!VOS_IS_STATUS_SUCCESS(status)) {
-		VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
-			  "%s: Fail to deinit timer, ret: %d",
-			  __func__, status);
-	}
+   wcnss_unregister_thermal_mitigation(hddDevTmLevelChangedHandler);
 
-	return VOS_STATUS_SUCCESS;
+   if(VOS_TIMER_STATE_RUNNING ==
+           vos_timer_getCurrentState(&pHddCtx->tmInfo.txSleepTimer))
+   {
+       vosStatus = vos_timer_stop(&pHddCtx->tmInfo.txSleepTimer);
+       if(!VOS_IS_STATUS_SUCCESS(vosStatus))
+       {
+           VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+                                "%s: Timer stop fail", __func__);
+       }
+   }
+
+   // Destroy the vos timer...
+   vosStatus = vos_timer_destroy(&pHddCtx->tmInfo.txSleepTimer);
+   if (!VOS_IS_STATUS_SUCCESS(vosStatus))
+   {
+       VOS_TRACE(VOS_MODULE_ID_HDD,VOS_TRACE_LEVEL_ERROR,
+                            "%s: Fail to destroy timer", __func__);
+   }
+
+   return VOS_STATUS_SUCCESS;
 }

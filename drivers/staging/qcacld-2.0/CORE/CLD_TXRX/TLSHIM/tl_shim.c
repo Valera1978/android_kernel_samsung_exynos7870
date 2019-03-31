@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -42,8 +42,6 @@
 #include "wma_api.h"
 #include "vos_utils.h"
 #include "wdi_out.h"
-#include "ol_rx_fwd.h"
-#include "ol_txrx.h"
 
 #define TLSHIM_PEER_AUTHORIZE_WAIT 50
 
@@ -462,99 +460,15 @@ is_ccmp_pn_replay_attack(void *vos_ctx, struct ieee80211_frame *wh,
 }
 #endif
 
-/**
- * tlshim_is_pkt_drop_candidate() - check if the mgmt frame should be droppped
- * @wma_handle: wma handle
- * @peer_addr: peer MAC address
- * @subtype: Management frame subtype
- *
- * This function is used to decide if a particular management frame should be
- * dropped to prevent DOS attack. Timestamp is used to decide the DOS attack.
- *
- * Return: true if the packet should be dropped and false oterwise
- */
-static bool tlshim_is_pkt_drop_candidate(tp_wma_handle wma_handle,
-					 uint8_t *peer_addr, uint8_t subtype)
-{
-	struct ol_txrx_peer_t *peer;
-	struct ol_txrx_pdev_t *pdev_ctx;
-	uint8_t peer_id;
-	tANI_BOOLEAN should_drop = eANI_BOOLEAN_FALSE;
-
-	/*
-	 * Currently this function handles only Disassoc,
-	 * Deauth and Assoc req frames. Return false for all other frames.
-	 */
-	if (subtype != IEEE80211_FC0_SUBTYPE_DISASSOC &&
-	    subtype != IEEE80211_FC0_SUBTYPE_DEAUTH &&
-	    subtype != IEEE80211_FC0_SUBTYPE_ASSOC_REQ) {
-		should_drop = FALSE;
-		goto end;
-	}
-
-	pdev_ctx = vos_get_context(VOS_MODULE_ID_TXRX, wma_handle->vos_context);
-	if (!pdev_ctx) {
-		TLSHIM_LOGE(FL("Failed to get the context"));
-		should_drop = TRUE;
-		goto end;
-	}
-
-	peer = ol_txrx_find_peer_by_addr(pdev_ctx, peer_addr, &peer_id);
-	if (!peer) {
-		if (IEEE80211_FC0_SUBTYPE_ASSOC_REQ != subtype) {
-			TLSHIM_LOGE(FL("Received mgmt frame: %0x from unknow peer: %pM"),
-				subtype, peer_addr);
-			should_drop = TRUE;
-		}
-		goto end;
-	}
-
-	switch (subtype) {
-	case IEEE80211_FC0_SUBTYPE_ASSOC_REQ:
-		if (peer->last_assoc_rcvd &&
-		    vos_system_time_after(peer->last_assoc_rcvd +
-					  TLSHIM_MGMT_FRAME_DETECT_DOS_TIMER,
-					  adf_os_gettimestamp())) {
-			TLSHIM_LOGD(FL("Dropping Assoc Req as it is received after %d ms of last frame. Allow it only after %d ms"),
-				    (int) (adf_os_gettimestamp() -
-				    peer->last_assoc_rcvd),
-				    TLSHIM_MGMT_FRAME_DETECT_DOS_TIMER);
-			should_drop = TRUE;
-			break;
-		}
-		peer->last_assoc_rcvd = adf_os_gettimestamp();
-		break;
-	case IEEE80211_FC0_SUBTYPE_DISASSOC:
-	case IEEE80211_FC0_SUBTYPE_DEAUTH:
-		if (peer->last_disassoc_deauth_rcvd &&
-		    vos_system_time_after(peer->last_disassoc_deauth_rcvd +
-					  TLSHIM_MGMT_FRAME_DETECT_DOS_TIMER,
-					  adf_os_gettimestamp())) {
-			TLSHIM_LOGD(FL("Dropping subtype %x frame as it is received after %d ms of last frame. Allow it only after %d ms"),
-				    subtype, (int) (adf_os_gettimestamp() -
-				    peer->last_disassoc_deauth_rcvd),
-				    TLSHIM_MGMT_FRAME_DETECT_DOS_TIMER);
-			should_drop = TRUE;
-			break;
-		}
-		peer->last_disassoc_deauth_rcvd = adf_os_gettimestamp();
-		break;
-	default:
-		break;
-	}
-
-end:
-	return should_drop;
-}
-
-#define RESERVE_BYTES   100
 static int tlshim_mgmt_rx_process(void *context, u_int8_t *data,
 				       u_int32_t data_len, bool saved_beacon, u_int32_t vdev_id)
 {
 	void *vos_ctx = vos_get_global_context(VOS_MODULE_ID_TL, NULL);
 	struct txrx_tl_shim_ctx *tl_shim = vos_get_context(VOS_MODULE_ID_TL,
 							   vos_ctx);
+#ifdef FEATURE_WLAN_D0WOW
 	tp_wma_handle wma_handle = vos_get_context(VOS_MODULE_ID_WDA, vos_ctx);
+#endif
 	WMI_MGMT_RX_EVENTID_param_tlvs *param_tlvs = NULL;
 	wmi_mgmt_rx_hdr *hdr = NULL;
 #ifdef WLAN_FEATURE_11W
@@ -574,10 +488,12 @@ static int tlshim_mgmt_rx_process(void *context, u_int8_t *data,
 		return 0;
 	}
 
+#ifdef FEATURE_WLAN_D0WOW
 	if (!wma_handle) {
 		TLSHIM_LOGE("%s: Failed to get WMA context!", __func__);
 		return 0;
 	}
+#endif
 
 	adf_os_spin_lock_bh(&tl_shim->mgmt_lock);
 	param_tlvs = (WMI_MGMT_RX_EVENTID_param_tlvs *) data;
@@ -594,11 +510,9 @@ static int tlshim_mgmt_rx_process(void *context, u_int8_t *data,
 		return 0;
 	}
 
-	if (hdr->buf_len < sizeof(struct ieee80211_frame) ||
-	   (!saved_beacon && hdr->buf_len > data_len)) {
+	if (hdr->buf_len < sizeof(struct ieee80211_frame)) {
 		adf_os_spin_unlock_bh(&tl_shim->mgmt_lock);
-		TLSHIM_LOGE("Invalid rx mgmt packet, saved_beacon %d, data_len %u, hdr->buf_len %u",
-				saved_beacon, data_len, hdr->buf_len);
+		TLSHIM_LOGE("Invalid rx mgmt packet");
 		return 0;
 	}
 
@@ -640,17 +554,6 @@ static int tlshim_mgmt_rx_process(void *context, u_int8_t *data,
 	rx_pkt->pkt_meta.mpdu_data_len = hdr->buf_len -
 					 rx_pkt->pkt_meta.mpdu_hdr_len;
 
-	/*
-	 * If the mpdu_data_len is greater than Max (2k), drop the frame
-	 */
-	if (rx_pkt->pkt_meta.mpdu_data_len > WMA_MAX_MGMT_MPDU_LEN) {
-		adf_os_spin_unlock_bh(&tl_shim->mgmt_lock);
-		TLSHIM_LOGE("Data Len %d greater than max, dropping frame",
-			 rx_pkt->pkt_meta.mpdu_data_len);
-		vos_mem_free(rx_pkt);
-		return 0;
-	}
-
     /*
      * saved_beacon means this beacon is a duplicate of one
      * sent earlier. roamCandidateInd flag is used to indicate to
@@ -659,28 +562,9 @@ static int tlshim_mgmt_rx_process(void *context, u_int8_t *data,
      */
 	rx_pkt->pkt_meta.roamCandidateInd = saved_beacon ? 1 : 0;
 	rx_pkt->pkt_meta.sessionId = vdev_id;
-	/*
-	 * Allocate the memory for this rx packet, add extra 100 bytes for:-
-	 *
-	 * 1.  Filling the missing RSN capabilites by some APs, which fill the
-	 *     RSN IE length as extra 2 bytes but dont fill the IE data with
-	 *     capabilities, resulting in failure in unpack core due to length
-	 *     mismatch. Check sir_validate_and_rectify_ies for more info.
-	 *
-	 * 2.  In the API wma_process_rmf_frame(), the driver trims the CCMP
-	 *     header by overwriting the IEEE header to memory occupied by CCMP
-	 *     header, but an overflow is possible if the memory allocated to
-	 *     frame is less than the sizeof(struct ieee80211_frame) +CCMP
-	 *     HEADER len, so allocating 100 bytes would solve this issue too.
-	 *
-	 * 3.  CCMP header is pointing to orig_hdr +
-	 *     sizeof(struct ieee80211_frame) which could also result in OOB
-	 *     access, if the data len is less than
-	 *     sizeof(struct ieee80211_frame), allocating extra bytes would
-	 *     result in solving this issue too.
-	 */
+	/* Why not just use rx_event->hdr.buf_len? */
 	wbuf = adf_nbuf_alloc(NULL,
-			      roundup(hdr->buf_len + RESERVE_BYTES, 4),
+			      roundup(hdr->buf_len, 4),
 			      0, 4, FALSE);
 	if (!wbuf) {
 		adf_os_spin_unlock_bh(&tl_shim->mgmt_lock);
@@ -814,7 +698,6 @@ static int tlshim_mgmt_rx_process(void *context, u_int8_t *data,
 				if (is_ccmp_pn_replay_attack(vos_ctx, wh,
 									ccmp)) {
 					TLSHIM_LOGE("Dropping the frame");
-					wma_handle->ccmp_replays_attack_cnt++;
 					vos_pkt_return_packet(rx_pkt);
 					return 0;
 				}
@@ -826,10 +709,6 @@ static int tlshim_mgmt_rx_process(void *context, u_int8_t *data,
 				adf_nbuf_pull_head(wbuf, IEEE80211_CCMP_HEADERLEN);
 				adf_nbuf_trim_tail(wbuf, IEEE80211_CCMP_MICLEN);
 
-				/* wh is moved, restore wh with relocated
-				 * ieee80211_frame header.
-				 */
-				wh = (struct ieee80211_frame *) adf_nbuf_data(wbuf);
 				rx_pkt->pkt_meta.mpdu_hdr_ptr = adf_nbuf_data(wbuf);
 				rx_pkt->pkt_meta.mpdu_len = adf_nbuf_len(wbuf);
 				rx_pkt->pkt_meta.mpdu_data_len =
@@ -846,12 +725,7 @@ static int tlshim_mgmt_rx_process(void *context, u_int8_t *data,
 					 IEEE80211_IS_MULTICAST(wh->i_addr1))
 				{
 					efrm = adf_nbuf_data(wbuf) + adf_nbuf_len(wbuf);
-					/* Check if frame is invalid length */
-					if (efrm - (uint8_t *)wh <
-					    sizeof(*wh) + vos_get_mmie_size()) {
-						TLSHIM_LOGE("Invalid frame length");
-						return 0;
-					}
+
 					key_id = (u_int16_t)*(efrm - vos_get_mmie_size() + 2);
 					if (!((key_id == WMA_IGTK_KEY_INDEX_4) ||
 						(key_id == WMA_IGTK_KEY_INDEX_5))) {
@@ -891,11 +765,6 @@ static int tlshim_mgmt_rx_process(void *context, u_int8_t *data,
 		}
 	}
 #endif /* WLAN_FEATURE_11W */
-	if (tlshim_is_pkt_drop_candidate(wma_handle, wh->i_addr2,
-					 mgt_subtype)) {
-		vos_pkt_return_packet(rx_pkt);
-		return -EINVAL;
-	}
 	return tl_shim->mgmt_rx(vos_ctx, rx_pkt);
 }
 
@@ -908,17 +777,17 @@ static int tlshim_mgmt_rx_wmi_handler(void *context, u_int8_t *data,
 	VOS_STATUS ret = VOS_STATUS_SUCCESS;
 
 	if (vos_is_logp_in_progress(VOS_MODULE_ID_TL, NULL)) {
-			TLSHIM_LOGD("%s: LOGP in progress\n", __func__);
+			TLSHIM_LOGE("%s: LOGP in progress\n", __func__);
 			return (-1);
 	}
 
 	if (vos_is_load_unload_in_progress(VOS_MODULE_ID_TL, NULL)) {
-			TLSHIM_LOGD("%s: load/unload in progress\n", __func__);
+			TLSHIM_LOGE("%s: load/unload in progress\n", __func__);
 			return (-1);
 	}
 
 	if (!tl_shim) {
-		TLSHIM_LOGD("%s: tl shim ctx is NULL\n", __func__);
+		TLSHIM_LOGE("%s: tl shim ctx is NULL\n", __func__);
 		return (-1);
 	}
 
@@ -1208,29 +1077,6 @@ static void tl_shim_cache_flush_work(struct work_struct *work)
 	}
 }
 
-/*
- * TLSHIM virtual monitor mode RX callback,
- * registered for OL data indication.
- */
-
-static void tl_shim_vir_mon_rx(adf_nbuf_t rx_buf_list)
-{
-	struct txrx_tl_shim_ctx *tl_shim;
-	void *vos_ctx = vos_get_global_context(VOS_MODULE_ID_TL, NULL);
-
-	tl_shim = vos_get_context(VOS_MODULE_ID_TL, vos_ctx);
-
-	if (!tl_shim) {
-		TLSHIM_LOGE("%s: Failed to get TLSHIM context", __func__);
-		return;
-	}
-
-	if (tl_shim->rx_monitor_cb)
-		tl_shim->rx_monitor_cb(vos_ctx, rx_buf_list, 0);
-	else
-		TLSHIM_LOGE("%s: tl_shim->rx_monitor_cb is NULL", __func__);
-}
-
 /*************************/
 /*	TL APIs		 */
 /*************************/
@@ -1283,84 +1129,11 @@ void WLANTL_UnRegisterVdev(void *vos_ctx, u_int8_t vdev_id)
 #endif /* QCA_LL_TX_FLOW_CT */
 }
 
-/**
- * tlshim_peer_validity() - determines whether peer is valid or not
- * @vos_ctx: vos context
- * @sta_id: station id
- *
- * Return: on success return vdev, NULL when peer is invalid/NULL
+/*
+ * TL API to transmit a frame given by HDD. Returns NULL
+ * in case of success, skb pointer in case of failure.
  */
-void *tlshim_peer_validity(void *vos_ctx, uint8_t sta_id)
-{
-	struct txrx_tl_shim_ctx *tl_shim = vos_get_context(VOS_MODULE_ID_TL,
-							vos_ctx);
-	struct ol_txrx_pdev_t *pdev = vos_get_context(VOS_MODULE_ID_TXRX,
-							vos_ctx);
-	struct ol_txrx_peer_t *peer;
-
-	if (!tl_shim) {
-		TLSHIM_LOGE("tl_shim is NULL");
-		return NULL;
-	}
-	if (!pdev) {
-		TLSHIM_LOGE("pdev is NULL");
-		return NULL;
-	}
-
-	if (sta_id >= WLAN_MAX_STA_COUNT) {
-		TLSHIM_LOGE("Invalid sta id for data tx");
-		return NULL;
-	}
-
-	if (!tl_shim->sta_info[sta_id].registered) {
-		TLSHIM_LOGW("Staion is not yet registered for data service");
-		return NULL;
-	}
-
-	peer = ol_txrx_peer_find_by_local_id(pdev, sta_id);
-	if (!peer) {
-		TLSHIM_LOGW("Invalid peer");
-		return NULL;
-	} else {
-		return (void *)peer->vdev;
-	}
-}
-
-/**
- * tlshim_selfpeer_vdev() - get the vdev of self peer
- * @vos_ctx: vos context
- *
- * Return: on success return vdev, NULL when self peer is invalid/NULL
- */
-void *tlshim_selfpeer_vdev(void *vos_ctx)
-{
-	struct ol_txrx_pdev_t *pdev = vos_get_context(VOS_MODULE_ID_TXRX,
-							   vos_ctx);
-	struct ol_txrx_peer_t *peer;
-
-	if (!pdev) {
-		TLSHIM_LOGE("Txrx pdev is NULL");
-		return NULL;
-	}
-
-	peer = pdev->self_peer;
-	if (!peer) {
-		TLSHIM_LOGW("Invalid peer");
-		return NULL;
-	} else {
-		return peer->vdev;
-	}
-}
-
-/**
- * WLANTL_SendSTA_DataFrame() - transmit frame from upper layers
- * @vos_ctx: pointer to vos context
- * @vdev: vdev
- * @skb: pointer to OS packet list
- *
- * Return: return NULL in success, pointer to skb list in case of failure
- */
-adf_nbuf_t WLANTL_SendSTA_DataFrame(void *vos_ctx, void *vdev,
+adf_nbuf_t WLANTL_SendSTA_DataFrame(void *vos_ctx, u_int8_t sta_id,
 				    adf_nbuf_t skb
 #ifdef QCA_PKT_PROTO_TRACE
 				  , v_U8_t proto_type
@@ -1369,10 +1142,17 @@ adf_nbuf_t WLANTL_SendSTA_DataFrame(void *vos_ctx, void *vdev,
 {
 	struct txrx_tl_shim_ctx *tl_shim = vos_get_context(VOS_MODULE_ID_TL,
 							   vos_ctx);
-	adf_nbuf_t ret, skb_list_head;
+	void *adf_ctx = vos_get_context(VOS_MODULE_ID_ADF, vos_ctx);
+	adf_nbuf_t ret;
+	struct ol_txrx_peer_t *peer;
 
 	if (!tl_shim) {
 		TLSHIM_LOGE("tl_shim is NULL");
+		return skb;
+	}
+
+	if (!adf_ctx) {
+		TLSHIM_LOGE("adf_ct is NULL");
 		return skb;
 	}
 
@@ -1380,24 +1160,47 @@ adf_nbuf_t WLANTL_SendSTA_DataFrame(void *vos_ctx, void *vdev,
 		TLSHIM_LOGW("%s: Driver load/unload in progress", __func__);
 		return skb;
 	}
-
-	skb_list_head = skb;
-	while (skb) {
-#ifdef QCA_PKT_PROTO_TRACE
-		adf_nbuf_trace_set_proto_type(skb, proto_type);
-#endif /* QCA_PKT_PROTO_TRACE */
-
-		if ((tl_shim->ip_checksum_offload) &&
-			(skb->protocol == htons(ETH_P_IP))
-			 && (skb->ip_summed == CHECKSUM_PARTIAL))
-			skb->ip_summed = CHECKSUM_COMPLETE;
-
-		skb = skb->next;
+	/*
+	 * TODO: How sta_id is created and used for IBSS mode?.
+	 */
+	if (sta_id >= WLAN_MAX_STA_COUNT) {
+		TLSHIM_LOGE("Invalid sta id for data tx");
+		return skb;
 	}
 
-	ret = tl_shim->tx(vdev, skb_list_head);
-	if (ret)
+	if (!tl_shim->sta_info[sta_id].registered) {
+		TLSHIM_LOGW("Staion is not yet registered for data service");
+		return skb;
+	}
+
+	peer = ol_txrx_peer_find_by_local_id(
+			((pVosContextType) vos_ctx)->pdev_txrx_ctx,
+			sta_id);
+	if (!peer) {
+		TLSHIM_LOGW("Invalid peer");
+		return skb;
+	}
+
+	/* Zero out skb's context buffer for the driver to use */
+	adf_os_mem_set(skb->cb, 0, sizeof(skb->cb));
+	adf_nbuf_map_single(adf_ctx, skb, ADF_OS_DMA_TO_DEVICE);
+
+#ifdef QCA_PKT_PROTO_TRACE
+	adf_nbuf_trace_set_proto_type(skb, proto_type);
+#endif /* QCA_PKT_PROTO_TRACE */
+
+	if ((tl_shim->ip_checksum_offload) && (skb->protocol == htons(ETH_P_IP))
+		 && (skb->ip_summed == CHECKSUM_PARTIAL))
+		skb->ip_summed = CHECKSUM_COMPLETE;
+
+	/* Terminate the (single-element) list of tx frames */
+	skb->next = NULL;
+	ret = tl_shim->tx(peer->vdev, skb);
+	if (ret) {
+		TLSHIM_LOGW("Failed to tx");
+		adf_nbuf_unmap_single(adf_ctx, ret, ADF_OS_DMA_TO_DEVICE);
 		return ret;
+	}
 
 	return NULL;
 }
@@ -1877,7 +1680,6 @@ VOS_STATUS WLANTL_ClearSTAClient(void *vos_ctx, u_int8_t sta_id)
 	}
 #endif
 
-	TLSHIM_LOGD("%s: called for sta_id %d", __func__, sta_id);
 	/* Purge the cached rx frame queue */
 	tl_shim_flush_rx_frames(vos_ctx, tl_shim, sta_id, 1);
 	adf_os_spin_lock_bh(&tl_shim->bufq_lock);
@@ -1893,30 +1695,6 @@ VOS_STATUS WLANTL_ClearSTAClient(void *vos_ctx, u_int8_t sta_id)
 	return VOS_STATUS_SUCCESS;
 }
 
-void tl_shim_flush_cache_rx_queue(void)
-{
-    void *vos_ctx = vos_get_global_context(VOS_MODULE_ID_TL, NULL);
-    struct txrx_tl_shim_ctx *tl_shim;
-    u_int8_t sta_id;
-
-    if (!vos_ctx) {
-        TLSHIM_LOGE("%s, Global VOS context is Null\n", __func__);
-        return;
-    }
-
-    tl_shim = vos_get_context(VOS_MODULE_ID_TL, vos_ctx);
-    if (!tl_shim) {
-        TLSHIM_LOGE("%s, tl_shim is NULL\n", __func__);
-        return;
-    }
-
-    TLSHIM_LOGD("%s: called to flush cache rx queue.\n", __func__);
-    for (sta_id = 0; sta_id < WLAN_MAX_STA_COUNT; sta_id++)
-        tl_shim_flush_rx_frames(vos_ctx, tl_shim, sta_id, 1);
-
-    return;
-}
-
 /*
  * Register a station for data service. This API gives flexibility
  * to register different callbacks for different client though it is
@@ -1925,6 +1703,8 @@ void tl_shim_flush_cache_rx_queue(void)
  */
 VOS_STATUS WLANTL_RegisterSTAClient(void *vos_ctx,
 				    WLANTL_STARxCBType rxcb,
+				    WLANTL_TxCompCBType tx_comp,
+				    WLANTL_STAFetchPktCBType txpkt_fetch,
 				    WLAN_STADescType *sta_desc, v_S7_t rssi)
 {
 	struct txrx_tl_shim_ctx *tl_shim;
@@ -1958,7 +1738,6 @@ VOS_STATUS WLANTL_RegisterSTAClient(void *vos_ctx,
 	sta_info->vdev_id = peer->vdev->vdev_id;
 	adf_os_spin_unlock_bh(&sta_info->stainfo_lock);
 
-	TLSHIM_LOGD("%s: called for sta_id %d", __func__, sta_desc->ucSTAId);
 	param.qos_capable =  sta_desc->ucQosEnabled;
 	wdi_in_peer_update(peer->vdev, peer->mac_addr.raw, &param,
 			   ol_txrx_peer_update_qos_capable);
@@ -1980,57 +1759,6 @@ VOS_STATUS WLANTL_RegisterSTAClient(void *vos_ctx,
 
 	/* Schedule a worker to flush cached rx frames */
 	schedule_work(&tl_shim->cache_flush_work);
-
-	return VOS_STATUS_SUCCESS;
-}
-
-VOS_STATUS tl_register_vir_mon_cb(void *vos_ctx,
-				  WLANTL_STARxCBType rxcb)
-{
-	struct txrx_tl_shim_ctx *tl_shim;
-	ol_txrx_pdev_handle pdev;
-
-	tl_shim = vos_get_context(VOS_MODULE_ID_TL, vos_ctx);
-	if (!tl_shim) {
-		TLSHIM_LOGE("tl_shim is NULL");
-		return VOS_STATUS_E_FAULT;
-	}
-
-	pdev = vos_get_context(VOS_MODULE_ID_TXRX, vos_ctx);
-	if (!pdev) {
-		TLSHIM_LOGE("%s: Failed to find pdev", __func__);
-		return VOS_STATUS_E_FAULT;
-	}
-
-	tl_shim->rx_monitor_cb = rxcb;
-
-	/* register TLSHIM RX montior callback to OL */
-	ol_txrx_osif_pdev_mon_register_cbk(pdev, tl_shim_vir_mon_rx);
-
-	return VOS_STATUS_SUCCESS;
-}
-
-VOS_STATUS tl_deregister_vir_mon_cb(void *vos_ctx)
-{
-	struct txrx_tl_shim_ctx *tl_shim;
-	ol_txrx_pdev_handle pdev;
-
-	tl_shim = vos_get_context(VOS_MODULE_ID_TL, vos_ctx);
-	if (!tl_shim) {
-		TLSHIM_LOGE("tl_shim is NULL");
-		return VOS_STATUS_E_FAULT;
-	}
-
-	pdev = vos_get_context(VOS_MODULE_ID_TXRX, vos_ctx);
-	if (!pdev) {
-		TLSHIM_LOGE("%s: Failed to find pdev", __func__);
-		return VOS_STATUS_E_FAULT;
-	}
-
-	tl_shim->rx_monitor_cb = NULL;
-
-	/* register TLSHIM RX montior callback to OL */
-	ol_txrx_osif_pdev_mon_register_cbk(pdev, NULL);
 
 	return VOS_STATUS_SUCCESS;
 }
@@ -2059,9 +1787,9 @@ VOS_STATUS WLANTL_Start(void *vos_ctx)
 VOS_STATUS WLANTL_Close(void *vos_ctx)
 {
 	struct txrx_tl_shim_ctx *tl_shim;
-	struct tlshim_buf *cache_buf, *tmp;
-	struct tlshim_sta_info *sta_info;
-	u_int16_t i;
+#if defined(QCA_LL_TX_FLOW_CT) || defined(QCA_SUPPORT_TXRX_VDEV_PAUSE_LL)
+	u_int8_t i;
+#endif /* QCA_LL_TX_FLOW_CT */
 
 	ENTER();
 	tl_shim = vos_get_context(VOS_MODULE_ID_TL, vos_ctx);
@@ -2093,19 +1821,7 @@ VOS_STATUS WLANTL_Close(void *vos_ctx)
 	vos_flush_work(&tl_shim->iapp_work.deferred_work);
 #endif
 	vos_flush_work(&tl_shim->cache_flush_work);
-	for (i = 0; i < WLAN_MAX_STA_COUNT; i++) {
-		sta_info = &tl_shim->sta_info[i];
-		adf_os_spin_lock_bh(&tl_shim->bufq_lock);
-		list_for_each_entry_safe(cache_buf, tmp,
-					 &sta_info->cached_bufq, list) {
-			list_del(&cache_buf->list);
-			adf_os_spin_unlock_bh(&tl_shim->bufq_lock);
-			adf_nbuf_free(cache_buf->buf);
-			adf_os_mem_free(cache_buf);
-			adf_os_spin_lock_bh(&tl_shim->bufq_lock);
-		}
-		adf_os_spin_unlock_bh(&tl_shim->bufq_lock);
-	}
+
 	wdi_in_pdev_detach(((pVosContextType) vos_ctx)->pdev_txrx_ctx, 1);
 	// Delete beacon buffer hanging off tl_shim
 	if (tl_shim->last_beacon_data) {
@@ -2125,7 +1841,6 @@ VOS_STATUS WLANTL_Close(void *vos_ctx)
 VOS_STATUS WLANTL_Open(void *vos_ctx, WLANTL_ConfigInfoType *tl_cfg)
 {
 	struct txrx_tl_shim_ctx *tl_shim;
-	ol_txrx_pdev_handle txrx_pdev;
 	VOS_STATUS status;
 	u_int8_t i;
 	int max_vdev;
@@ -2136,7 +1851,7 @@ VOS_STATUS WLANTL_Open(void *vos_ctx, WLANTL_ConfigInfoType *tl_cfg)
 	if (status != VOS_STATUS_SUCCESS)
 		return status;
 
-	txrx_pdev = ((pVosContextType) vos_ctx)->pdev_txrx_ctx =
+	((pVosContextType) vos_ctx)->pdev_txrx_ctx =
 				wdi_in_pdev_attach(
 					((pVosContextType) vos_ctx)->cfg_ctx,
 					((pVosContextType) vos_ctx)->htc_ctx,
@@ -2146,8 +1861,6 @@ VOS_STATUS WLANTL_Open(void *vos_ctx, WLANTL_ConfigInfoType *tl_cfg)
 		vos_free_context(vos_ctx, VOS_MODULE_ID_TL, tl_shim);
 		return VOS_STATUS_E_NOMEM;
 	}
-
-	ol_tx_failure_cb_set(txrx_pdev, wma_tx_failure_cb);
 
 	adf_os_spinlock_init(&tl_shim->bufq_lock);
 	adf_os_spinlock_init(&tl_shim->mgmt_lock);
@@ -2159,11 +1872,20 @@ VOS_STATUS WLANTL_Open(void *vos_ctx, WLANTL_ConfigInfoType *tl_cfg)
 		INIT_LIST_HEAD(&tl_shim->sta_info[i].cached_bufq);
 	}
 
-	vos_init_work(&tl_shim->cache_flush_work, tl_shim_cache_flush_work);
+#ifdef CONFIG_CNSS
+	cnss_init_work(&tl_shim->cache_flush_work, tl_shim_cache_flush_work);
+#else
+	INIT_WORK(&tl_shim->cache_flush_work, tl_shim_cache_flush_work);
+#endif
 
 #if defined(FEATURE_WLAN_ESE) && !defined(FEATURE_WLAN_ESE_UPLOAD)
-	vos_init_work(&(tl_shim->iapp_work.deferred_work),
+#ifdef CONFIG_CNSS
+	cnss_init_work(&(tl_shim->iapp_work.deferred_work),
 		tlshim_mgmt_over_data_rx_handler);
+#else
+	INIT_WORK(&(tl_shim->iapp_work.deferred_work),
+		tlshim_mgmt_over_data_rx_handler);
+#endif
 #endif
 	/*
 	 * TODO: Allocate memory for tx callback for maximum supported
@@ -2244,42 +1966,6 @@ VOS_STATUS tl_shim_get_vdevid(struct ol_txrx_peer_t *peer, u_int8_t *vdev_id)
 	return VOS_STATUS_SUCCESS;
 }
 
-#ifdef QCA_SUPPORT_TXRX_LOCAL_PEER_ID
-/**
- * tl_shim_get_sta_id_by_addr() - get peer local id given the MAC address.
- * @vos_context: pointer to vos context
- * @mac_addr: pointer to mac address
- *
- * Return: local id of the peer given the MAC address.
- */
-uint16_t tl_shim_get_sta_id_by_addr(void *vos_context, uint8_t *mac_addr)
-{
-	struct ol_txrx_peer_t *peer;
-	ol_txrx_pdev_handle pdev;
-	uint8_t peer_id;
-
-	if (vos_context == NULL || mac_addr == NULL) {
-		TLSHIM_LOGE("Invalid argument %pK, %pK", vos_context, mac_addr);
-		return 0;
-	}
-
-	pdev = vos_get_context(VOS_MODULE_ID_TXRX, vos_context);
-	if (!pdev) {
-		TLSHIM_LOGE("PDEV [%pM] not found", mac_addr);
-		return 0;
-	}
-
-	peer = ol_txrx_find_peer_by_addr(pdev, mac_addr, &peer_id);
-
-	if (!peer) {
-		TLSHIM_LOGW("PEER [%pM] not found", mac_addr);
-		return 0;
-	}
-
-	return peer->local_id;
-}
-#endif
-
 /*
  * Function to get vdev(tl_context) given the MAC address.
  */
@@ -2290,7 +1976,7 @@ void *tl_shim_get_vdev_by_addr(void *vos_context, uint8_t *mac_addr)
 	uint8_t peer_id;
 
 	if (vos_context == NULL || mac_addr == NULL) {
-		TLSHIM_LOGE("Invalid argument %pK, %pK", vos_context, mac_addr);
+		TLSHIM_LOGE("Invalid argument %p, %p", vos_context, mac_addr);
 		return NULL;
 	}
 
@@ -2303,7 +1989,7 @@ void *tl_shim_get_vdev_by_addr(void *vos_context, uint8_t *mac_addr)
 	peer = ol_txrx_find_peer_by_addr(pdev, mac_addr, &peer_id);
 
 	if (!peer) {
-		TLSHIM_LOGW("PEER [%pM] not found", mac_addr);
+		TLSHIM_LOGE("PEER [%pM] not found", mac_addr);
 		return NULL;
 	}
 
@@ -2366,9 +2052,8 @@ WLANTL_PauseUnPauseQs(void *vos_context, v_BOOL_t flag)
  *
  * HDD will call this API to get the OL-TXRX module stats
  *
- * Return: VOS_STATUS
  */
-VOS_STATUS WLANTL_Get_llStats
+void WLANTL_Get_llStats
 (
 	uint8_t sessionId,
 	char *buffer,
@@ -2380,22 +2065,24 @@ VOS_STATUS WLANTL_Get_llStats
 	struct ol_txrx_vdev_t *vdev;
 
 	if (!vos_context) {
-		return VOS_STATUS_E_FAILURE;
+		return;
 	}
 
 	tl_shim = vos_get_context(VOS_MODULE_ID_TL, vos_context);
 	if (!tl_shim) {
 		TLSHIM_LOGD("%s, tl_shim is NULL",
                     __func__);
-		return VOS_STATUS_E_FAILURE;
+		return;
 	}
 
 	vdev = tl_shim->session_flow_control[sessionId].vdev;
 	if (!vdev) {
 		TLSHIM_LOGE("%s, vdev is NULL", __func__);
-		return VOS_STATUS_E_FAILURE;
+		return;
 	}
-	return ol_txrx_stats(vdev, buffer, (unsigned)length);
+	ol_txrx_stats(vdev, buffer, (unsigned)length);
+	return;
+
 }
 
 /*=============================================================================
@@ -2935,38 +2622,3 @@ void WLANTL_clear_datapath_stats(void *vos_ctx, uint16_t bitmap)
 	wdi_in_clear_stats(pdev, bitmap);
 	return;
 }
-
-/**
- * tlshim_get_intra_bss_fwd_pkts_count() - to get the total tx and rx packets
- *    that have been forwarded from txrx layer without coming to upper layers.
- * @session_id: session id/vdev id
- * @fwd_tx_packets: pointer to forwarded tx packets count parameter
- * @fwd_rx_packets: pointer to forwarded rx packets count parameter
- *
- * Returns: status -> A_OK - success, A_ERROR - failure
- *
- */
-A_STATUS tlshim_get_intra_bss_fwd_pkts_count(uint8_t session_id,
-		unsigned long *fwd_tx_packets, unsigned long *fwd_rx_packets)
-{
-	return ol_get_intra_bss_fwd_pkts_count(session_id, fwd_tx_packets,
-							fwd_rx_packets);
-}
-
-/*
- * tlshim_get_ll_queue_pause_bitmap() - to obtain ll queue pause bitmap and
- *                                      last pause timestamp
- * @session_id: vdev id
- * @pause_bitmap: pointer to return ll queue pause bitmap
- * @pause_timestamp: pointer to return pause timestamp to calling func.
- *
- * Return: status -> A_OK - for success, A_ERROR for failure
- *
- */
-A_STATUS tlshim_get_ll_queue_pause_bitmap(uint8_t session_id,
-	uint8_t *pause_bitmap, adf_os_time_t *pause_timestamp)
-{
-	return ol_txrx_get_ll_queue_pause_bitmap(session_id,
-		pause_bitmap, pause_timestamp);
-}
-

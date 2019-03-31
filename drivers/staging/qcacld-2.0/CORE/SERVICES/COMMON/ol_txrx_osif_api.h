@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2014, 2017-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012, 2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -98,12 +98,6 @@ typedef void (*ol_txrx_rx_fp)(void *osif_dev, adf_nbuf_t msdus);
  */
 typedef void (*ol_txrx_tx_flow_control_fp)(void *osif_dev,
                                            u_int8_t vdev_id, a_bool_t tx_resume);
-/**
- * @typedef ol_txrx_vir_mon_rx_fp
- * @brief receive function to hand montior frames from txrx to OS shim
- * @param msdus - rx monitor frame(s), in a null-terminated list
- */
-typedef void (*ol_txrx_vir_mon_rx_fp)(adf_nbuf_t msdus);
 
 /**
  * @typedef ol_txrx_rx_fp
@@ -213,65 +207,5 @@ adf_nbuf_t ol_txrx_osif_tso_segment(
     ol_txrx_vdev_handle txrx_vdev,
     int max_seg_payload_bytes,
     adf_nbuf_t jumbo_tcp_frame);
-
-/**
- * @brief register the TLSHIM montior callback to OL pdev context
- * @details
- * For the virtual monitor interface which real VDEV is not created case,
- * just store the TLSHIM RX montior callback into TXRX_PDEV context.
- * later when receive RX montior packets from HTT layer, call the callback
- * stored in TXRX_PDEV to deliver packets to TLSHIM.
- *
- * @param txrx_pdev - TXRX physical device context
- * @param cbk - TLSHIM montior callback to be registered
- */
-void
-ol_txrx_osif_pdev_mon_register_cbk(
-	ol_txrx_pdev_handle txrx_pdev,
-	ol_txrx_vir_mon_rx_fp cbk);
-
-#ifdef QCA_SUPPORT_TXRX_DRIVER_TCP_DEL_ACK
-void
-ol_tx_vdev_set_driver_del_ack_enable(uint8_t vdev_id, unsigned long tx_packets,
-			uint32_t time_in_ms, uint32_t high_th, uint32_t low_th);
-void
-ol_tx_pdev_reset_driver_del_ack(void *pdev);
-
-#else
-static inline void
-ol_tx_vdev_set_driver_del_ack_enable(uint8_t vdev_id, unsigned long tx_packets,
-			uint32_t time_in_ms, uint32_t high_th, uint32_t low_th)
-{
-	return;
-}
-static inline void
-ol_tx_pdev_reset_driver_del_ack(void *pdev)
-{
-	return;
-}
-
-#endif
-
-#ifdef QCA_SUPPORT_TXRX_HL_BUNDLE
-void
-ol_tx_vdev_set_bundle_require(uint8_t vdev_id, unsigned long tx_packets,
-			uint32_t time_in_ms, uint32_t high_th, uint32_t low_th);
-void
-ol_tx_pdev_reset_bundle_require(void* pdev);
-
-#else
-static inline void
-ol_tx_vdev_set_bundle_require(uint8_t vdev_id, unsigned long tx_packets,
-			uint32_t time_in_ms, uint32_t high_th, uint32_t low_th)
-{
-	return;
-}
-static inline void
-ol_tx_pdev_reset_bundle_require(void* pdev)
-{
-	return;
-}
-
-#endif
 
 #endif /* _OL_TXRX_OSIF_API__H_ */

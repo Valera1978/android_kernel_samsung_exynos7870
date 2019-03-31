@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -76,13 +76,6 @@ struct ol_txrx_stats_req {
     } wait;
 };
 
-struct ol_txrx_stats_req_internal {
-    struct ol_txrx_stats_req base;
-    TAILQ_ENTRY(ol_txrx_stats_req_internal) req_list_elem;
-    int serviced; /* state of this request */
-    int offset;
-};
-
 #ifndef TXRX_DEBUG_LEVEL
 #define TXRX_DEBUG_LEVEL 0 /* no debug info */
 #endif
@@ -91,7 +84,7 @@ struct ol_txrx_stats_req_internal {
 
 #define ol_txrx_debug(vdev, debug_specs) 0
 #define ol_txrx_fw_stats_cfg(vdev, type, val) 0
-#define ol_txrx_fw_stats_get(vdev, req, response_expected) 0
+#define ol_txrx_fw_stats_get(vdev, req) 0
 #define ol_txrx_aggr_cfg(vdev, max_subfrms_ampdu, max_subfrms_amsdu) 0
 
 #else /*---------------------------------------------------------------------*/
@@ -108,8 +101,7 @@ void ol_txrx_fw_stats_cfg(
 
 int ol_txrx_fw_stats_get(
     ol_txrx_vdev_handle vdev,
-    struct ol_txrx_stats_req *req,
-    bool response_expected);
+    struct ol_txrx_stats_req *req);
 
 
 int ol_txrx_aggr_cfg(ol_txrx_vdev_handle vdev,
@@ -149,7 +141,7 @@ void ol_txrx_peer_display(ol_txrx_peer_handle peer, int indent);
 #endif
 
 /*--- txrx stats display debug functions ---*/
-VOS_STATUS ol_txrx_stats(ol_txrx_vdev_handle vdev, char *buffer,
+void ol_txrx_stats(ol_txrx_vdev_handle vdev, char *buffer,
                    unsigned length);
 
 #if TXRX_STATS_LEVEL != TXRX_STATS_LEVEL_OFF

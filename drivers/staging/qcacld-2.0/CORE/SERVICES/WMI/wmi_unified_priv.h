@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -38,7 +38,7 @@
 #include "adf_os_atomic.h"
 
 #define WMI_UNIFIED_MAX_EVENT 0x100
-#define WMI_MAX_CMDS  256
+#define WMI_MAX_CMDS  1024
 
 typedef adf_nbuf_t wmi_buf_t;
 
@@ -84,7 +84,6 @@ struct wmi_unified {
 #ifdef WLAN_OPEN_SOURCE
        struct fwdebug dbglog;
        struct dentry *debugfs_phy;
-       struct dentry *cfr_stations;
 #endif /* WLAN_OPEN_SOURCE */
 
 #ifdef WMI_INTERFACE_EVENT_LOGGING
@@ -95,23 +94,6 @@ struct wmi_unified {
 #ifdef FEATURE_RUNTIME_PM
 	adf_os_atomic_t runtime_pm_inprogress;
 #endif
-	bool tgt_force_assert_enable;
-	A_BOOL tag_crash_inject;
 	void (*wma_wow_tx_complete_cbk)(ol_scn_t scn_handle);
-	u8 cfr_enable;
 };
-
-#define ANT_DIV_SET_PERIOD(probe_period, stay_period) \
-	((1<<26)|((probe_period&0x1fff)<<13)|(stay_period&0x1fff))
-
-#define ANT_DIV_SET_SNR_DIFF(snr_diff) \
-	((1<<27)|(snr_diff&0x1fff))
-
-#define ANT_DIV_SET_PROBE_DWELL_TIME(probe_dwell_time) \
-	((1<<28)|(probe_dwell_time&0x1fff))
-
-#define ANT_DIV_SET_WEIGHT(mgmt_snr_weight, data_snr_weight, ack_snr_weight) \
-	((1<<29)|((mgmt_snr_weight&0xff)<<16)|((data_snr_weight&0xff)<<8)| \
-	(ack_snr_weight&0xff))
-
 #endif

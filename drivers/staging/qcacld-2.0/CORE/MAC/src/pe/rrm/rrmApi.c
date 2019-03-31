@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -44,7 +44,7 @@
 #include "wniApi.h"
 #include "sirApi.h"
 #include "aniGlobal.h"
-#include "wni_cfg.h"
+#include "wniCfgSta.h"
 #include "limTypes.h"
 #include "limUtils.h"
 #include "limSendSmeRspMessages.h"
@@ -282,7 +282,7 @@ rrmProcessLinkMeasurementRequest( tpAniSirGlobal pMac,
    }
    pHdr = WDA_GET_RX_MAC_HEADER( pRxPacketInfo );
 
-   LinkReport.txPower = limGetMaxTxPower (pSessionEntry->maxTxPower,
+   LinkReport.txPower = limGetMaxTxPower (pLinkReq->MaxTxPower.maxTxPower,
                                           pLinkReq->MaxTxPower.maxTxPower,
                                           pMac->roam.configParam.nTxPowerCap);
 
@@ -386,29 +386,29 @@ rrmProcessNeighborReportResponse( tpAniSirGlobal pMac,
    vos_mem_set(pSmeNeighborRpt, length, 0);
 
    /* Allocated memory for pSmeNeighborRpt...will be freed by other module */
-   if (pNeighborRep->num_NeighborReport <= 1) {
-       for( i = 0 ; i < pNeighborRep->num_NeighborReport ; i++ )
-       {
-          pSmeNeighborRpt->sNeighborBssDescription[i].length = sizeof( tSirNeighborBssDescription ); /*+ any optional ies */
-          vos_mem_copy(pSmeNeighborRpt->sNeighborBssDescription[i].bssId,
-                       pNeighborRep->NeighborReport[i].bssid,
-                       sizeof(tSirMacAddr));
-          pSmeNeighborRpt->sNeighborBssDescription[i].bssidInfo.rrmInfo.fApPreauthReachable = pNeighborRep->NeighborReport[i].APReachability;
-          pSmeNeighborRpt->sNeighborBssDescription[i].bssidInfo.rrmInfo.fSameSecurityMode = pNeighborRep->NeighborReport[i].Security;
-          pSmeNeighborRpt->sNeighborBssDescription[i].bssidInfo.rrmInfo.fSameAuthenticator = pNeighborRep->NeighborReport[i].KeyScope;
-          pSmeNeighborRpt->sNeighborBssDescription[i].bssidInfo.rrmInfo.fCapSpectrumMeasurement = pNeighborRep->NeighborReport[i].SpecMgmtCap;
-          pSmeNeighborRpt->sNeighborBssDescription[i].bssidInfo.rrmInfo.fCapQos = pNeighborRep->NeighborReport[i].QosCap;
-          pSmeNeighborRpt->sNeighborBssDescription[i].bssidInfo.rrmInfo.fCapApsd = pNeighborRep->NeighborReport[i].apsd;
-          pSmeNeighborRpt->sNeighborBssDescription[i].bssidInfo.rrmInfo.fCapRadioMeasurement = pNeighborRep->NeighborReport[i].rrm;
-          pSmeNeighborRpt->sNeighborBssDescription[i].bssidInfo.rrmInfo.fCapDelayedBlockAck = pNeighborRep->NeighborReport[i].DelayedBA;
-          pSmeNeighborRpt->sNeighborBssDescription[i].bssidInfo.rrmInfo.fCapImmediateBlockAck = pNeighborRep->NeighborReport[i].ImmBA;
-          pSmeNeighborRpt->sNeighborBssDescription[i].bssidInfo.rrmInfo.fMobilityDomain = pNeighborRep->NeighborReport[i].MobilityDomain;
 
-          pSmeNeighborRpt->sNeighborBssDescription[i].regClass = pNeighborRep->NeighborReport[i].regulatoryClass;
-          pSmeNeighborRpt->sNeighborBssDescription[i].channel = pNeighborRep->NeighborReport[i].channel;
-          pSmeNeighborRpt->sNeighborBssDescription[i].phyType = pNeighborRep->NeighborReport[i].PhyType;
-       }
+   for( i = 0 ; i < pNeighborRep->num_NeighborReport ; i++ )
+   {
+      pSmeNeighborRpt->sNeighborBssDescription[i].length = sizeof( tSirNeighborBssDescription ); /*+ any optional ies */
+      vos_mem_copy(pSmeNeighborRpt->sNeighborBssDescription[i].bssId,
+                   pNeighborRep->NeighborReport[i].bssid,
+                   sizeof(tSirMacAddr));
+      pSmeNeighborRpt->sNeighborBssDescription[i].bssidInfo.rrmInfo.fApPreauthReachable = pNeighborRep->NeighborReport[i].APReachability;
+      pSmeNeighborRpt->sNeighborBssDescription[i].bssidInfo.rrmInfo.fSameSecurityMode = pNeighborRep->NeighborReport[i].Security;
+      pSmeNeighborRpt->sNeighborBssDescription[i].bssidInfo.rrmInfo.fSameAuthenticator = pNeighborRep->NeighborReport[i].KeyScope;
+      pSmeNeighborRpt->sNeighborBssDescription[i].bssidInfo.rrmInfo.fCapSpectrumMeasurement = pNeighborRep->NeighborReport[i].SpecMgmtCap;
+      pSmeNeighborRpt->sNeighborBssDescription[i].bssidInfo.rrmInfo.fCapQos = pNeighborRep->NeighborReport[i].QosCap;
+      pSmeNeighborRpt->sNeighborBssDescription[i].bssidInfo.rrmInfo.fCapApsd = pNeighborRep->NeighborReport[i].apsd;
+      pSmeNeighborRpt->sNeighborBssDescription[i].bssidInfo.rrmInfo.fCapRadioMeasurement = pNeighborRep->NeighborReport[i].rrm;
+      pSmeNeighborRpt->sNeighborBssDescription[i].bssidInfo.rrmInfo.fCapDelayedBlockAck = pNeighborRep->NeighborReport[i].DelayedBA;
+      pSmeNeighborRpt->sNeighborBssDescription[i].bssidInfo.rrmInfo.fCapImmediateBlockAck = pNeighborRep->NeighborReport[i].ImmBA;
+      pSmeNeighborRpt->sNeighborBssDescription[i].bssidInfo.rrmInfo.fMobilityDomain = pNeighborRep->NeighborReport[i].MobilityDomain;
+
+      pSmeNeighborRpt->sNeighborBssDescription[i].regClass = pNeighborRep->NeighborReport[i].regulatoryClass;
+      pSmeNeighborRpt->sNeighborBssDescription[i].channel = pNeighborRep->NeighborReport[i].channel;
+      pSmeNeighborRpt->sNeighborBssDescription[i].phyType = pNeighborRep->NeighborReport[i].PhyType;
    }
+
    pSmeNeighborRpt->messageType = eWNI_SME_NEIGHBOR_REPORT_IND;
    pSmeNeighborRpt->length = length;
    pSmeNeighborRpt->sessionId = pSessionEntry->smeSessionId;
@@ -418,8 +418,7 @@ rrmProcessNeighborReportResponse( tpAniSirGlobal pMac,
    //Send request to SME.
    mmhMsg.type    = pSmeNeighborRpt->messageType;
    mmhMsg.bodyptr = pSmeNeighborRpt;
-   MTRACE(macTrace(pMac, TRACE_CODE_TX_SME_MSG, pSessionEntry->peSessionId,
-                                                           mmhMsg.type));
+   MTRACE(macTraceMsgTx(pMac, pSessionEntry->peSessionId, mmhMsg.type));
    status = limSysProcessMmhMsgApi(pMac, &mmhMsg, ePROT);
 
    return status;
@@ -628,37 +627,22 @@ rrmProcessBeaconReportReq( tpAniSirGlobal pMac,
    pSmeBcnReportReq->channelList.numChannels = num_channels;
    if( pBeaconReq->measurement_request.Beacon.num_APChannelReport )
    {
-      tANI_U8 *ch_lst = pSmeBcnReportReq->channelList.channelNumber;
-      tANI_U8 len;
-      tANI_U16 ch_ctr = 0;
-      for(num_APChanReport = 0;
-          num_APChanReport <
-          pBeaconReq->measurement_request.Beacon.num_APChannelReport;
-          num_APChanReport++) {
-              len = pBeaconReq->measurement_request.Beacon.
-                  APChannelReport[num_APChanReport].num_channelList;
-              if (ch_ctr + len >
-                 sizeof(pSmeBcnReportReq->channelList.channelNumber))
-                      break;
+      tANI_U8 *pChanList = pSmeBcnReportReq->channelList.channelNumber;
+      for( num_APChanReport = 0 ; num_APChanReport < pBeaconReq->measurement_request.Beacon.num_APChannelReport ; num_APChanReport++ )
+      {
+         vos_mem_copy(pChanList,
+          pBeaconReq->measurement_request.Beacon.APChannelReport[num_APChanReport].channelList,
+          pBeaconReq->measurement_request.Beacon.APChannelReport[num_APChanReport].num_channelList);
 
-              vos_mem_copy(&ch_lst[ch_ctr],
-                           pBeaconReq->measurement_request.Beacon.
-                           APChannelReport[num_APChanReport].channelList,
-                           len);
-
-              ch_ctr += len;
+         pChanList += pBeaconReq->measurement_request.Beacon.APChannelReport[num_APChanReport].num_channelList;
       }
    }
 
    //Send request to SME.
    mmhMsg.type    = eWNI_SME_BEACON_REPORT_REQ_IND;
    mmhMsg.bodyptr = pSmeBcnReportReq;
-   MTRACE(macTrace(pMac, TRACE_CODE_TX_SME_MSG, pSessionEntry->peSessionId,
-                                                          mmhMsg.type));
-   if (eSIR_SUCCESS != limSysProcessMmhMsgApi(pMac, &mmhMsg, ePROT))
-      return eRRM_FAILURE;
-
-   return eRRM_SUCCESS;
+   MTRACE(macTraceMsgTx(pMac, pSessionEntry->peSessionId, mmhMsg.type));
+   return limSysProcessMmhMsgApi(pMac, &mmhMsg, ePROT);
 }
 
 // --------------------------------------------------------------------
@@ -1246,8 +1230,8 @@ rrmInitialize(tpAniSirGlobal pMac)
    pRRMCaps->fine_time_meas_rpt = 1;
    pRRMCaps->lci_capability = 1;
 
-   pRRMCaps->operatingChanMax = 4;
-   pRRMCaps->nonOperatingChanMax = 4;
+   pRRMCaps->operatingChanMax = 3;
+   pRRMCaps->nonOperatingChanMax = 3;
 
    return eSIR_SUCCESS;
 }

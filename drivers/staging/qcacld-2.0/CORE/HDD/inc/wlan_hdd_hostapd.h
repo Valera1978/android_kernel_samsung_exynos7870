@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -55,10 +55,7 @@
 /* max length of command string in hostapd ioctl */
 #define HOSTAPD_IOCTL_COMMAND_STRLEN_MAX   8192
 
-hdd_adapter_t* hdd_wlan_create_ap_dev(hdd_context_t *pHddCtx,
-                                      tSirMacAddr macAddr,
-                                      unsigned char name_assign_type,
-                                      tANI_U8 *name);
+hdd_adapter_t* hdd_wlan_create_ap_dev( hdd_context_t *pHddCtx, tSirMacAddr macAddr, tANI_U8 *name);
 
 VOS_STATUS hdd_register_hostapd(hdd_adapter_t *pAdapter, tANI_U8 rtnl_held);
 
@@ -92,13 +89,11 @@ int hdd_softap_unpackIE( tHalHandle halHandle,
                 u_int8_t *gen_ie );
 
 VOS_STATUS hdd_hostapd_SAPEventCB( tpSap_Event pSapEvent, v_PVOID_t usrDataForCallback);
-VOS_STATUS hdd_init_ap_mode( hdd_adapter_t *pAdapter, bool reinit);
+VOS_STATUS hdd_init_ap_mode( hdd_adapter_t *pAdapter );
 void hdd_set_ap_ops( struct net_device *pWlanHostapdDev );
 int hdd_hostapd_stop (struct net_device *dev);
 void hdd_hostapd_channel_wakelock_init(hdd_context_t *pHddCtx);
 void hdd_hostapd_channel_wakelock_deinit(hdd_context_t *pHddCtx);
-void hdd_sap_indicate_disconnect_for_sta(hdd_adapter_t *adapter);
-void hdd_sap_destroy_events(hdd_adapter_t *adapter);
 #ifdef FEATURE_WLAN_FORCE_SAP_SCC
 void hdd_restart_softap (hdd_context_t *pHddCtx, hdd_adapter_t *pAdapter);
 #endif /* FEATURE_WLAN_FORCE_SAP_SCC */
@@ -123,20 +118,7 @@ hdd_set_sap_auth_offload(hdd_adapter_t *pHostapdAdapter, bool enabled)
 {
 }
 #endif /* SAP_AUTH_OFFLOAD */
-
 int hdd_softap_set_channel_change(struct net_device *dev, int target_channel);
-#ifdef WLAN_FEATURE_SAP_TO_FOLLOW_STA_CHAN
-VOS_STATUS hdd_sta_state_sap_notify(hdd_context_t *hdd_context,
-                                sta_sap_notifications event,
-                                struct wlan_sap_csa_info csa_info);
-VOS_STATUS hdd_send_sap_event(struct net_device *dev,
-                sta_sap_notifications event,
-                struct wlan_sap_csa_info csa_info,
-                struct wireless_dev *wdev);
-void hdd_hostapd_chan_switch_cb(v_PVOID_t usrDataForCallback);
-
-int hdd_softap_set_channel_change(struct net_device *dev, int target_channel);
-#endif //WLAN_FEATURE_SAP_TO_FOLLOW_STA_CHAN
 
 /**
  * hdd_is_sta_connection_pending() - This function will check if sta connection
@@ -188,18 +170,16 @@ hdd_change_sta_conn_pending_status(hdd_context_t *hdd_ctx,
 static inline bool
 hdd_is_sap_restart_required(hdd_context_t *hdd_ctx)
 {
-    bool status = false;
+    bool status;
     spin_lock(&hdd_ctx->sap_update_info_lock);
-    if (!hdd_ctx->is_ch_avoid_in_progress)
-        status = hdd_ctx->is_sap_restart_required;
+    status = hdd_ctx->is_sap_restart_required;
     spin_unlock(&hdd_ctx->sap_update_info_lock);
     return status;
 }
 
 /**
  * hdd_change_sap_restart_required_status() - This function will change the
- * value of is_sap_restart_required
- *
+ *                                            value of is_sap_restart_required
  * @hdd_ctx: pointer to hdd context
  * @value: value to set
  *
@@ -216,59 +196,4 @@ hdd_change_sap_restart_required_status(hdd_context_t *hdd_ctx,
     spin_unlock(&hdd_ctx->sap_update_info_lock);
 }
 
-/**
- * hdd_change_ch_avoidance_status() - update is_ch_avoid_in_progress flag
- *
- * @hdd_ctx: pointer to hdd context
- * @value: value to set
- *
- * This function will change the value of is_ch_avoid_in_progress
- *
- * Return: none
- */
-static inline void
-hdd_change_ch_avoidance_status(hdd_context_t *hdd_ctx,
-                               bool value)
-{
-    spin_lock(&hdd_ctx->sap_update_info_lock);
-    hdd_ctx->is_ch_avoid_in_progress = value;
-    spin_unlock(&hdd_ctx->sap_update_info_lock);
-    hddLog(LOG1, FL("is_ch_avoid_in_progress %d"), value);
-}
-
-#ifdef FEATURE_WLAN_SUB_20_MHZ
-bool hdd_hostapd_sub20_channelwidth_can_switch(
-	hdd_adapter_t *adapter, uint32_t *sub20_channel_width);
-bool hdd_hostapd_sub20_channelwidth_can_restore(
-	hdd_adapter_t *adapter);
-bool hdd_sub20_channelwidth_can_set(
-	hdd_adapter_t *adapter, uint32_t sub20_channel_width);
-int hdd_softap_set_channel_sub20_chanwidth_change(
-	struct net_device *dev, uint32_t chan_width);
-#else
-static inline bool hdd_hostapd_sub20_channelwidth_can_switch(
-	hdd_adapter_t *adapter, uint32_t *sub20_channel_width)
-{
-	return false;
-}
-
-static inline bool hdd_hostapd_sub20_channelwidth_can_restore(
-	hdd_adapter_t *adapter)
-{
-	return false;
-}
-
-static inline bool hdd_sub20_channelwidth_can_set(
-	hdd_adapter_t *adapter, uint32_t sub20_channel_width)
-{
-	return false;
-}
-
-static inline
-int hdd_softap_set_channel_sub20_chanwidth_change(
-	struct net_device *dev, uint32_t chan_width)
-{
-	return -ENOTSUPP;
-}
-#endif
 #endif    // end #if !defined( WLAN_HDD_HOSTAPD_H )

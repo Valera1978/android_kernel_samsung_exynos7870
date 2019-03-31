@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -38,7 +38,7 @@
  *
  */
 #include "palTypes.h"
-#include "wni_cfg.h"
+#include "wniCfgSta.h"
 #include "wniApi.h"
 #include "sirCommon.h"
 #include "sirDebug.h"
@@ -76,9 +76,7 @@
 #include "vos_utils.h"
 #include "wlan_qct_tl.h"
 #include "sysStartup.h"
-#include "pktlog_ac_fmt.h"
 
-static tp_pe_packetdump_cb gpe_packetdump_cb;
 
 static void __limInitScanVars(tpAniSirGlobal pMac)
 {
@@ -243,17 +241,6 @@ static void __limInitStates(tpAniSirGlobal pMac)
     pMac->lim.gLimProbeRespDisableFlag = 0; // control over probe response
 }
 
-#ifdef FEATURE_OEM_DATA_SUPPORT
-static void lim_set_oem_data_req(tpAniSirGlobal mac)
-{
-	mac->lim.gpLimMlmOemDataReq = NULL;
-}
-#else
-static inline void lim_set_oem_data_req(tpAniSirGlobal mac)
-{
-}
-#endif
-
 static void __limInitVars(tpAniSirGlobal pMac)
 {
     // Place holder for Measurement Req/Rsp/Ind related info
@@ -304,7 +291,6 @@ static void __limInitVars(tpAniSirGlobal pMac)
     /* Init SAP deffered Q Head */
     lim_init_sap_deferred_msg_queue(pMac);
 #endif
-    lim_set_oem_data_req(pMac);
 }
 
 static void __limInitAssocVars(tpAniSirGlobal pMac)
@@ -316,19 +302,6 @@ static void __limInitAssocVars(tpAniSirGlobal pMac)
     }
     pMac->lim.gLimAssocStaLimit = val;
     pMac->lim.gLimIbssStaLimit = val;
-    if(wlan_cfgGetInt(pMac, WNI_CFG_ASSOC_STA_LIMIT_AP, &val) != eSIR_SUCCESS)
-        limLog( pMac, LOGP, FL( "cfg get assoc sta of AP limit failed" ));
-
-    pMac->lim.glim_assoc_sta_limit_ap = val;
-
-    if(wlan_cfgGetInt(pMac, WNI_CFG_ASSOC_STA_LIMIT_GO, &val) != eSIR_SUCCESS)
-        limLog( pMac, LOGP, FL( "cfg get assoc sta of GO limit failed" ));
-
-    pMac->lim.glim_assoc_sta_limit_go = val;
-
-    limLog(pMac, LOG1, FL("max_peer:%d ap_peer:%d go_peer:%d"),
-           pMac->lim.gLimAssocStaLimit, pMac->lim.glim_assoc_sta_limit_ap,
-           pMac->lim.glim_assoc_sta_limit_go);
     // Place holder for current authentication request
     // being handled
     pMac->lim.gpLimMlmAuthReq = NULL;
@@ -345,6 +318,10 @@ static void __limInitAssocVars(tpAniSirGlobal pMac)
 
     // Place holder for Pre-authentication node list
     pMac->lim.pLimPreAuthList = NULL;
+
+    // Send Disassociate frame threshold parameters
+    pMac->lim.gLimDisassocFrameThreshold = LIM_SEND_DISASSOC_FRAME_THRESHOLD;
+    pMac->lim.gLimDisassocFrameCredit = 0;
 
     //One cache for each overlap and associated case.
     vos_mem_set(pMac->lim.protStaOverlapCache,
@@ -500,17 +477,11 @@ static tSirRetStatus __limInitConfig( tpAniSirGlobal pMac )
    if (wlan_cfgGetInt(pMac, WNI_CFG_MAX_RX_AMPDU_FACTOR, &val2) != eSIR_SUCCESS)
    {
       PELOGE(limLog(pMac, LOGE, FL("could not retrieve AMPDU Factor CFG"));)
+      return eSIR_FAILURE;
    }
-   if (wlan_cfgGetInt(pMac, WNI_CFG_MPDU_DENSITY, &val3) != eSIR_SUCCESS) {
-       limLog(pMac, LOGE, FL("could not retrieve MPDU Density CFG"));
-       return eSIR_FAILURE;
-   }
-
    val16 = ( tANI_U16 ) val1;
    pAmpduParamInfo = ( tSirMacHTParametersInfo* ) &val16;
    pAmpduParamInfo->maxRxAMPDUFactor = (tANI_U8)val2;
-   pAmpduParamInfo->mpduDensity = (uint8_t)val3;
-
    if(cfgSetInt(pMac,  WNI_CFG_HT_AMPDU_PARAMS, *(tANI_U8*)pAmpduParamInfo) !=
       eSIR_SUCCESS)
    {
@@ -623,10 +594,7 @@ tSirRetStatus limStart(tpAniSirGlobal pMac)
       pMac->lim.gLimReturnAfterFirstMatch = 0;
 
       // Initialize MLM state machine
-      if (eSIR_SUCCESS != limInitMlm(pMac)) {
-          limLog(pMac, LOGE, FL("Init MLM failed."));
-          return eSIR_FAILURE;
-      }
+      limInitMlm(pMac);
 
       // By default return unique scan results
       pMac->lim.gLimReturnUniqueResults = true;
@@ -745,7 +713,6 @@ limCleanup(tpAniSirGlobal pMac)
 {
 //Before destroying the list making sure all the nodes have been deleted.
 //Which should be the normal case, but a memory leak has been reported.
-    uint8_t i;
 
     tpLimMgmtFrameRegistration pLimMgmtRegistration = NULL;
 
@@ -766,8 +733,6 @@ limCleanup(tpAniSirGlobal pMac)
     // free up preAuth table
     if (pMac->lim.gLimPreAuthTimerTable.pTable != NULL)
     {
-        for (i = 0; i < pMac->lim.gLimPreAuthTimerTable.numEntry; i++)
-            vos_mem_free(pMac->lim.gLimPreAuthTimerTable.pTable[i]);
         vos_mem_free(pMac->lim.gLimPreAuthTimerTable.pTable);
         pMac->lim.gLimPreAuthTimerTable.pTable = NULL;
         pMac->lim.gLimPreAuthTimerTable.numEntry = 0;
@@ -831,70 +796,131 @@ limCleanup(tpAniSirGlobal pMac)
 
 } /*** end limCleanup() ***/
 
+
+#ifdef WLAN_FEATURE_11W
 /**
- * lim_state_info_dump() - print state information of lim layer
- * @buf: buffer pointer
- * @size: size of buffer to be filled
+ * lim_is_assoc_req_for_drop()- function to decides to drop assoc\reassoc
+ *  frames.
+ * @mac: pointer to global mac structure
+ * @rx_pkt_info: rx packet meta information
  *
- * This function is used to print state information of lim layer
+ * This function is called before enqueuing the frame to PE queue to
+ * drop flooded assoc/reassoc frames getting into PE Queue.
  *
- * Return: None
+ * Return: true for dropping the frame otherwise false
  */
-static void lim_state_info_dump(char **buf_ptr, uint16_t *size)
+
+bool lim_is_assoc_req_for_drop(tpAniSirGlobal mac, uint8_t *rx_pkt_info)
 {
-	tHalHandle hal;
-	tpAniSirGlobal mac;
-	v_CONTEXT_t vos_ctx_ptr;
-	uint16_t len = 0;
-	char *buf = *buf_ptr;
+	uint8_t session_id;
+	uint16_t aid;
+	tpPESession session_entry;
+	tpSirMacMgmtHdr mac_hdr;
+	tpDphHashNode sta_ds;
 
-	/* get the global voss context */
-	vos_ctx_ptr = vos_get_global_context(VOS_MODULE_ID_VOSS, NULL);
-
-	if (NULL == vos_ctx_ptr) {
-		VOS_ASSERT(0);
-		return;
+	mac_hdr = WDA_GET_RX_MAC_HEADER(rx_pkt_info);
+	session_entry = peFindSessionByBssid(mac, mac_hdr->bssId, &session_id);
+	if (!session_entry) {
+		PELOG1(limLog(pMac, LOG1,
+			FL("session does not exist for given STA [%pM]"),
+			mac_hdr->sa););
+		return false;
 	}
 
-	hal = vos_get_context(VOS_MODULE_ID_PE, vos_ctx_ptr);
-	if (NULL == hal) {
-		VOS_ASSERT(0);
-		return;
+	sta_ds = dphLookupHashEntry(mac, mac_hdr->sa, &aid,
+				&session_entry->dph.dphHashTable);
+	if (!sta_ds) {
+		PELOG1(limLog(pMac, LOG1, FL("pStaDs is NULL")););
+		return false;
 	}
 
-	mac = PMAC_STRUCT(hal);
+	if (!sta_ds->rmfEnabled)
+		return false;
 
-	limLog(mac, LOG1, FL("size of buffer: %d"), *size);
+	if (sta_ds->pmfSaQueryState == DPH_SA_QUERY_IN_PROGRESS)
+		return true;
 
-	len += vos_scnprintf(buf + len, *size - len,
-		"\n SmeState: %d", mac->lim.gLimSmeState);
-	len += vos_scnprintf(buf + len, *size - len,
-		"\n PrevSmeState: %d", mac->lim.gLimPrevSmeState);
-	len += vos_scnprintf(buf + len, *size - len,
-		"\n MlmState: %d", mac->lim.gLimMlmState);
-	len += vos_scnprintf(buf + len, *size - len,
-		"\n PrevMlmState: %d", mac->lim.gLimPrevMlmState);
-	len += vos_scnprintf(buf + len, *size - len,
-		"\n SystemInScanLearnMode: %d",
-		mac->lim.gLimSystemInScanLearnMode);
-	len += vos_scnprintf(buf + len, *size - len,
-		"\n ProcessDefdMsgs: %d", mac->lim.gLimProcessDefdMsgs);
-	len += vos_scnprintf(buf + len, *size - len,
-		"\n gLimHalScanState: %d", mac->lim.gLimHalScanState);
+	if (sta_ds->last_assoc_received_time &&
+		((vos_timer_get_system_time() -
+			 sta_ds->last_assoc_received_time) < 1000))
+		return true;
 
-	*size -= len;
-	*buf_ptr += len;
+	sta_ds->last_assoc_received_time = vos_timer_get_system_time();
+	return false;
 }
-
+#endif
 /**
- * lim_register_debug_callback() - registration function for lim layer
- * to print lim state information
+ * lim_is_deauth_diassoc_for_drop()- function to decides to drop deauth\diassoc
+ *  frames.
+ * @mac: pointer to global mac structure
+ * @rx_pkt_info: rx packet meta information
  *
- * Return: None
+ * This function is called before enqueuing the frame to PE queue to
+ * drop flooded deauth/diassoc frames getting into PE Queue.
+ *
+ * Return: true for dropping the frame otherwise false
  */
-static void lim_register_debug_callback(void)
+
+bool lim_is_deauth_diassoc_for_drop(tpAniSirGlobal mac, uint8_t *rx_pkt_info)
 {
-	vos_register_debug_callback(VOS_MODULE_ID_PE, &lim_state_info_dump);
+	uint8_t session_id;
+	uint16_t aid;
+	tpPESession session_entry;
+	tpSirMacMgmtHdr mac_hdr;
+	tpDphHashNode   sta_ds;
+
+	mac_hdr = WDA_GET_RX_MAC_HEADER(rx_pkt_info);
+	session_entry = peFindSessionByBssid(mac, mac_hdr->bssId, &session_id);
+	if (!session_entry) {
+		PELOG1(limLog(mac, LOG1,
+			FL("session does not exist for given STA [%pM]"),
+			mac_hdr->sa););
+		return true;
+	}
+
+	sta_ds = dphLookupHashEntry(mac, mac_hdr->sa, &aid,
+					&session_entry->dph.dphHashTable);
+	if (!sta_ds) {
+		PELOG1(limLog(mac, LOG1,FL("pStaDs is NULL")););
+		return true;
+	}
+
+#ifdef WLAN_FEATURE_11W
+	if (session_entry->limRmfEnabled) {
+		if ((WDA_GET_RX_DPU_FEEDBACK(rx_pkt_info) &
+			DPU_FEEDBACK_UNPROTECTED_ERROR)) {
+			/* It may be possible that deauth/diassoc frames from a
+			 * spoofy AP is received. So if all further
+			 * deauth/diassoc frmaes are dropped, then it may
+			 * result in lossing deauth/diassoc frames from genuine
+			 * AP. So process all deauth/diassoc frames with
+			 * a time difference of 1 sec.
+			 */
+			if ((vos_timer_get_system_time() -
+				 sta_ds->last_unprot_deauth_disassoc) < 1000)
+				return true;
+
+			sta_ds->last_unprot_deauth_disassoc =
+					vos_timer_get_system_time();
+		} else {
+			/* PMF enabed, Management frames are protected */
+			if (sta_ds->proct_deauh_disassoc_cnt)
+				return true;
+			else
+				sta_ds->proct_deauh_disassoc_cnt++;
+		}
+	}
+	else
+#endif
+	/* PMF disabled */
+	{
+		if (sta_ds->isDisassocDeauthInProgress)
+			return true;
+		else
+			sta_ds->isDisassocDeauthInProgress++;
+	}
+
+	return false;
 }
 
 /** -------------------------------------------------------------
@@ -914,7 +940,6 @@ tSirRetStatus peOpen(tpAniSirGlobal pMac, tMacOpenParameters *pMacOpenParam)
 
     pMac->lim.maxBssId = pMacOpenParam->maxBssId;
     pMac->lim.maxStation = pMacOpenParam->maxStation;
-    adf_os_spinlock_init(&pMac->sys.bbt_mgmt_lock);
 
     if ((pMac->lim.maxBssId == 0) || (pMac->lim.maxStation == 0)) {
          PELOGE(limLog(pMac, LOGE,
@@ -951,7 +976,6 @@ tSirRetStatus peOpen(tpAniSirGlobal pMac, tMacOpenParameters *pMacOpenParam)
                                         pMac->lim.maxStation, 0);
 
     pMac->lim.mgmtFrameSessionId = 0xff;
-    pMac->lim.tdls_frm_session_id = 0xff;
     pMac->lim.deferredMsgCnt = 0;
 
     if (!VOS_IS_STATUS_SUCCESS(vos_lock_init(&pMac->lim.lkPeGlobalLock))) {
@@ -959,6 +983,7 @@ tSirRetStatus peOpen(tpAniSirGlobal pMac, tMacOpenParameters *pMacOpenParam)
         status = eSIR_FAILURE;
         goto pe_open_lock_fail;
     }
+    pMac->lim.deauthMsgCnt = 0;
     pMac->lim.retry_packet_cnt = 0;
     pMac->lim.gLimIbssRetryCnt = 0;
 
@@ -970,8 +995,6 @@ tSirRetStatus peOpen(tpAniSirGlobal pMac, tMacOpenParameters *pMacOpenParam)
 #ifdef LIM_TRACE_RECORD
     MTRACE(limTraceInit(pMac));
 #endif
-    lim_register_debug_callback();
-
     return status; /* status here will be eSIR_SUCCESS */
 
 pe_open_lock_fail:
@@ -987,24 +1010,6 @@ pe_open_psession_fail:
     return status;
 }
 
-#ifdef FEATURE_OEM_DATA_SUPPORT
-static void lim_free_oem_data_req(tpAniSirGlobal mac)
-{
-	if (mac->lim.gpLimMlmOemDataReq) {
-		if (mac->lim.gpLimMlmOemDataReq->data) {
-			vos_mem_free(mac->lim.gpLimMlmOemDataReq->data);
-			mac->lim.gpLimMlmOemDataReq->data = NULL;
-		}
-		vos_mem_free(mac->lim.gpLimMlmOemDataReq);
-		mac->lim.gpLimMlmOemDataReq = NULL;
-	}
-}
-#else
-static inline void lim_free_oem_data_req(tpAniSirGlobal mac)
-{
-}
-#endif
-
 /** -------------------------------------------------------------
 \fn peClose
 \brief will be called in close sequence from macClose
@@ -1019,7 +1024,6 @@ tSirRetStatus peClose(tpAniSirGlobal pMac)
     if (ANI_DRIVER_TYPE(pMac) == eDRIVER_TYPE_MFG)
         return eSIR_SUCCESS;
 
-    adf_os_spinlock_destroy(&pMac->sys.bbt_mgmt_lock);
     for(i =0; i < pMac->lim.maxBssId; i++)
     {
         if(pMac->lim.gpSession[i].valid == TRUE)
@@ -1029,7 +1033,12 @@ tSirRetStatus peClose(tpAniSirGlobal pMac)
     }
     vos_mem_free(pMac->lim.limTimers.gpLimCnfWaitTimer);
     pMac->lim.limTimers.gpLimCnfWaitTimer = NULL;
-    lim_free_oem_data_req(pMac);
+
+    if (pMac->lim.gpLimMlmOemDataReq) {
+        vos_mem_free(pMac->lim.gpLimMlmOemDataReq);
+        pMac->lim.gpLimMlmOemDataReq = NULL;
+    }
+
     vos_mem_free(pMac->lim.gpSession);
     pMac->lim.gpSession = NULL;
     vos_mem_free(pMac->pmm.gPmmTim.pTim);
@@ -1125,6 +1134,9 @@ tANI_U8 limIsTimerAllowedInPowerSaveState(tpAniSirGlobal pMac, tSirMsgQ *pMsg)
             case SIR_LIM_PERIODIC_PROBE_REQ_TIMEOUT:
                 retStatus = FALSE;
                 break;
+            /* May allow following timer messages in sleep mode */
+            case SIR_LIM_HASH_MISS_THRES_TIMEOUT:
+
             /* Safe to allow as of today, this triggers background scan
              * which will not be started if the device is in power-save mode
              * might need to block in the future if we decide to implement
@@ -1209,21 +1221,6 @@ limPostMsgApi(tpAniSirGlobal pMac, tSirMsgQ *pMsg)
 
 } /*** end limPostMsgApi() ***/
 
-/**
- * lim_post_msg_high_pri() - posts high priority pe message
- * @mac: mac context
- * @msg: message to be posted
- *
- * This function is used to post high priority pe message
- *
- * Return: returns value returned by vos_mq_post_message_by_priority
- */
-uint32_t
-lim_post_msg_high_pri(tpAniSirGlobal mac, tSirMsgQ *msg)
-{
-	return vos_mq_post_message_by_priority(VOS_MQ_ID_PE, (vos_msg_t *)msg,
-					       HIGH_PRIORITY);
-}
 
 /*--------------------------------------------------------------------------
 
@@ -1274,60 +1271,6 @@ tSirRetStatus peProcessMessages(tpAniSirGlobal pMac, tSirMsgQ* pMsg)
     return eSIR_SUCCESS;
 }
 
-/**
- * pe_drop_pending_rx_mgmt_frames: To drop pending RX mgmt frames
- * @mac_ctx: Pointer to global MAC structure
- * @hdr: Management header
- * @vos_pkt: Packet
- *
- * This function is used to drop RX pending mgmt frames if pe mgmt queue
- * reaches threshold
- *
- * Return: VOS_STATUS_SUCCESS on success or VOS_STATUS_E_FAILURE on failure
- */
-static VOS_STATUS pe_drop_pending_rx_mgmt_frames(tpAniSirGlobal mac_ctx,
-                               tpSirMacMgmtHdr hdr, vos_pkt_t *vos_pkt)
-{
-       adf_os_spin_lock(&mac_ctx->sys.bbt_mgmt_lock);
-       if (mac_ctx->sys.sys_bbt_pending_mgmt_count >=
-            MGMT_RX_PACKETS_THRESHOLD) {
-               adf_os_spin_unlock(&mac_ctx->sys.bbt_mgmt_lock);
-               limLog(mac_ctx, LOG1,
-                       FL("No.of pending RX management frames reaches to threshold, dropping management frames"));
-               vos_pkt_return_packet(vos_pkt);
-               vos_pkt = NULL;
-               mac_ctx->rx_packet_drop_counter++;
-               return VOS_STATUS_E_FAILURE;
-       } else if (mac_ctx->sys.sys_bbt_pending_mgmt_count >
-                  (MGMT_RX_PACKETS_THRESHOLD / 2)) {
-               /* drop all probereq, proberesp and beacons */
-               if (hdr->fc.subType == SIR_MAC_MGMT_BEACON ||
-                   hdr->fc.subType == SIR_MAC_MGMT_PROBE_REQ ||
-                   hdr->fc.subType == SIR_MAC_MGMT_PROBE_RSP) {
-                       adf_os_spin_unlock(&mac_ctx->sys.bbt_mgmt_lock);
-                       if (!(mac_ctx->rx_packet_drop_counter % 100))
-                               limLog(mac_ctx, LOG1,
-                                       FL("No.of pending RX mgmt frames reaches 1/2 thresh, dropping frame subtype: %d rx_packet_drop_counter: %d"),
-                                       hdr->fc.subType,
-                                       mac_ctx->rx_packet_drop_counter);
-                       mac_ctx->rx_packet_drop_counter++;
-                       vos_pkt_return_packet(vos_pkt);
-                       vos_pkt = NULL;
-                       return VOS_STATUS_E_FAILURE;
-               }
-       }
-       mac_ctx->sys.sys_bbt_pending_mgmt_count++;
-       adf_os_spin_unlock(&mac_ctx->sys.bbt_mgmt_lock);
-       if (mac_ctx->sys.sys_bbt_pending_mgmt_count ==
-           (MGMT_RX_PACKETS_THRESHOLD / 4)) {
-               if (!(mac_ctx->rx_packet_drop_counter % 100))
-                      limLog(mac_ctx, LOG1,
-                              FL("No.of pending RX management frames reaches to 1/4th of threshold, rx_packet_drop_counter: %d"),
-                              mac_ctx->rx_packet_drop_counter);
-               mac_ctx->rx_packet_drop_counter++;
-       }
-       return VOS_STATUS_SUCCESS;
-}
 
 
 // ---------------------------------------------------------------------------
@@ -1389,11 +1332,21 @@ VOS_STATUS peHandleMgmtFrame( v_PVOID_t pvosGCtx, v_PVOID_t vosBuff)
 
     mHdr = WDA_GET_RX_MAC_HEADER(pRxPacketInfo);
     if(mHdr->fc.type == SIR_MAC_MGMT_FRAME) {
-        limLog(pMac, LOG2,
-              FL("Type: %d Subtype: %d from: " MAC_ADDRESS_STR " with Seq no %d"),
-              mHdr->fc.type, mHdr->fc.subType, MAC_ADDR_ARRAY(mHdr->sa),
-              ((mHdr->seqControl.seqNumHi << 4) |
-              (mHdr->seqControl.seqNumLo)));
+        PELOG1(limLog( pMac, LOG1,
+               FL("RxBd=%p mHdr=%p Type: %d Subtype: %d  Sizes:FC%d Mgmt%d"),
+               pRxPacketInfo, mHdr, mHdr->fc.type, mHdr->fc.subType,
+               sizeof(tSirMacFrameCtl), sizeof(tSirMacMgmtHdr));)
+
+        limLog(pMac, LOG1, FL("mpdu_len:%d hdr_len:%d data_len:%d"),
+               WDA_GET_RX_MPDU_LEN(pRxPacketInfo),
+               WDA_GET_RX_MPDU_HEADER_LEN(pRxPacketInfo),
+               WDA_GET_RX_PAYLOAD_LEN(pRxPacketInfo));
+
+        MTRACE(macTrace(pMac, TRACE_CODE_RX_MGMT,
+                        WDA_GET_RX_PAYLOAD_LEN(pRxPacketInfo),
+                        LIM_TRACE_MAKE_RXMGMT(mHdr->fc.subType,
+                        (tANI_U16) (((tANI_U16)(mHdr->seqControl.seqNumHi << 4))
+                        | mHdr->seqControl.seqNumLo)));)
 
 #ifdef WLAN_FEATURE_ROAM_SCAN_OFFLOAD
        if (WDA_GET_ROAMCANDIDATEIND(pRxPacketInfo))
@@ -1404,15 +1357,8 @@ VOS_STATUS peHandleMgmtFrame( v_PVOID_t pvosGCtx, v_PVOID_t vosBuff)
            limLog(pMac, LOG1, FL("offloadScanLearn %d"),
                   WDA_GET_OFFLOADSCANLEARN(pRxPacketInfo));
 #endif
-
-    if ((mHdr->fc.subType != SIR_MAC_MGMT_BEACON) && gpe_packetdump_cb)
-        gpe_packetdump_cb(pVosPkt->pkt_buf, VOS_STATUS_SUCCESS,
-                                   pVosPkt->pkt_meta.sessionId, RX_MGMT_PKT);
     }
 
-    if (VOS_STATUS_SUCCESS !=
-        pe_drop_pending_rx_mgmt_frames(pMac, mHdr, pVosPkt))
-        return VOS_STATUS_E_FAILURE;
 
     // Forward to MAC via mesg = SIR_BB_XPORT_MGMT_MSG
     msg.type = SIR_BB_XPORT_MGMT_MSG;
@@ -1426,11 +1372,8 @@ VOS_STATUS peHandleMgmtFrame( v_PVOID_t pvosGCtx, v_PVOID_t vosBuff)
     {
         vos_pkt_return_packet(pVosPkt);
         pVosPkt = NULL;
-        /*
-         * Decrement sys_bbt_pending_mgmt_count if packet
-         * is dropped before posting to LIM
-         */
-        lim_decrement_pending_mgmt_count(pMac);
+        limLog( pMac, LOGW,
+                FL ( "sysBbtProcessMessageCore failed to process SIR_BB_XPORT_MGMT_MSG" ));
         return VOS_STATUS_E_FAILURE;
     }
 
@@ -1764,10 +1707,9 @@ lim_enc_type_matched(tpAniSirGlobal mac_ctx,
            bcn->capabilityInfo.privacy, bcn->wpaPresent,
            bcn->rsnPresent);
     limLog(mac_ctx, LOG1,
-           FL("session:: Privacy :%d EncyptionType: %d OSEN %d WPS %d"),
+           FL("session:: Privacy :%d EncyptionType: %d"),
            SIR_MAC_GET_PRIVACY(session->limCurrentBssCaps),
-           session->encryptType, session->osen_association,
-           session->wps_registration);
+           session->encryptType);
 
     /* This is handled by sending probe req due to IOT issues so return TRUE */
     if ((bcn->capabilityInfo.privacy) !=
@@ -1800,24 +1742,6 @@ lim_enc_type_matched(tpAniSirGlobal mac_ctx,
                     || (session->encryptType == eSIR_ED_CCMP)
                     || (session->encryptType == eSIR_ED_AES_128_CMAC)))
         return true;
-
-    /* For HS2.0, RSN ie is not present
-     * in beacon. Therefore no need to
-     * check for security type in case
-     * OSEN session.
-     * For WPS registration session no need to
-     * detect security mismatch as it won't match and
-     * driver may end up sending probe request without
-     * WPS IE during WPS registration process.
-     */
-     /*TODO: AP capability mismatch
-     * is not checked here because
-     * no logic for beacon parsing
-     * is avilable for HS2.0
-     */
-    if (session->osen_association ||
-            session->wps_registration)
-        return eSIR_TRUE;
 
     return false;
 }
@@ -2089,12 +2013,6 @@ void limHandleMissedBeaconInd(tpAniSirGlobal pMac, tpSirMsgQ pMsg)
         limMissedBeaconInActiveMode(pMac, psessionEntry);
     }
 #endif
-    if (pMac->pmm.inMissedBeaconScenario == TRUE) {
-        limLog(pMac, LOGW,
-               FL("beacon miss handling is already going on for BSSIdx:%d"),
-               pSirMissedBeaconInd->bssIdx);
-        return;
-    }
     else
     {
         limLog(pMac, LOGE,
@@ -2102,49 +2020,6 @@ void limHandleMissedBeaconInd(tpAniSirGlobal pMac, tpSirMsgQ pMsg)
             pMac->pmm.gPmmState);
     }
     return;
-}
-
-/**
- * lim_smps_force_mode_ind() - Process smps force mode event
- * @mac_ctx: Global MAC pointer
- * @data: message containing the parameters of the event
- *
- * Process the smps force mode event and post message to SME to
- * invoke the HDD callback
- *
- * Return: None
- */
-void lim_smps_force_mode_ind(tpAniSirGlobal mac_ctx, tpSirMsgQ data)
-{
-	tSirMsgQ msg;
-	tpPESession psession_entry;
-	struct sir_smps_force_mode_event *smps_ind, *param;
-
-	smps_ind = data->bodyptr;
-	psession_entry = pe_find_session_by_sme_session_id(mac_ctx,
-						smps_ind->vdev_id);
-	if (psession_entry == NULL) {
-		limLog(mac_ctx, LOGE,
-		       FL("session does not exist for given BSSIdx: %d"),
-		       smps_ind->vdev_id);
-		return;
-	}
-
-	param = vos_mem_malloc(sizeof(*param));
-	if (NULL == param) {
-		limLog(mac_ctx, LOGE, FL("Failed to allocate memory"));
-		return;
-	}
-	*param = *smps_ind;
-
-	msg.type = eWNI_SME_SMPS_FORCE_MODE_IND;
-	msg.bodyptr = param;
-	msg.bodyval = 0;
-	limLog(mac_ctx, LOGE,
-	       FL("send eWNI_SME_SMPS_FORCE_MODE_IND to SME"));
-
-	limSysProcessMmhMsgApi(mac_ctx, &msg, ePROT);
-	return;
 }
 
 void
@@ -2455,7 +2330,7 @@ void limRoamOffloadSynchInd(tpAniSirGlobal pMac, tpSirMsgQ pMsg)
      pftSessionEntry->limPrevSmeState = pftSessionEntry->limSmeState;
      pftSessionEntry->limSmeState = eLIM_SME_WT_REASSOC_STATE;
      VOS_TRACE(VOS_MODULE_ID_PE, VOS_TRACE_LEVEL_DEBUG,
-               "LFR3:%s:created session (%pK) with id = %d",
+               "LFR3:%s:created session (%p) with id = %d",
                __func__, pftSessionEntry, pftSessionEntry->peSessionId);
      /* Update the ReAssoc BSSID of the current session */
      sirCopyMacAddr(psessionEntry->limReAssocbssId, pbssDescription->bssId);
@@ -2475,32 +2350,6 @@ void limRoamOffloadSynchInd(tpAniSirGlobal pMac, tpSirMsgQ pMsg)
 }
 
 #endif
-
-/**
- * lim_mon_init_session() - create PE session for monitor mode operation
- * @mac_ptr: mac pointer
- * @msg: Pointer to struct sir_create_session type.
- *
- * Return: NONE
- */
-void lim_mon_init_session(tpAniSirGlobal mac_ptr,
-			  struct sir_create_session *msg)
-{
-	tpPESession psession_entry;
-	uint8_t session_id;
-
-	if((psession_entry = peCreateSession(mac_ptr, msg->bss_id,
-	                                  &session_id, mac_ptr->lim.maxStation,
-	                                  eSIR_MONITOR_MODE)) == NULL) {
-		limLog(mac_ptr, LOGE,
-		       FL("Monitor mode: Session Can not be created"));
-		limPrintMacAddr(mac_ptr, msg->bss_id, LOGE);
-		return;
-	}
-	psession_entry->vhtCapability = 1;
-	psession_entry->sub20_channelwidth = mac_ptr->sub20_channelwidth;
-}
-
 /** -----------------------------------------------------------------
   \brief limMicFailureInd() - handles mic failure  indication
 
@@ -2525,7 +2374,7 @@ void limMicFailureInd(tpAniSirGlobal pMac, tpSirMsgQ pMsg)
          return;
     }
 
-    pSirSmeMicFailureInd = vos_mem_malloc(sizeof(*pSirSmeMicFailureInd));
+    pSirSmeMicFailureInd = vos_mem_malloc(sizeof(tSirSmeMicFailureInd));
     if (NULL == pSirSmeMicFailureInd)
     {
         // Log error
@@ -2534,13 +2383,46 @@ void limMicFailureInd(tpAniSirGlobal pMac, tpSirMsgQ pMsg)
        return;
     }
 
-    *pSirSmeMicFailureInd = *pSirMicFailureInd;
+    pSirSmeMicFailureInd->messageType = eWNI_SME_MIC_FAILURE_IND;
+    pSirSmeMicFailureInd->length = sizeof(pSirSmeMicFailureInd);
     pSirSmeMicFailureInd->sessionId = psessionEntry->smeSessionId;
+
+    vos_mem_copy(pSirSmeMicFailureInd->bssId,
+                 pSirMicFailureInd->bssId,
+                 sizeof(tSirMacAddr));
+
+    vos_mem_copy(pSirSmeMicFailureInd->info.srcMacAddr,
+                 pSirMicFailureInd->info.srcMacAddr,
+                 sizeof(tSirMacAddr));
+
+    vos_mem_copy(pSirSmeMicFailureInd->info.taMacAddr,
+                 pSirMicFailureInd->info.taMacAddr,
+                 sizeof(tSirMacAddr));
+
+    vos_mem_copy(pSirSmeMicFailureInd->info.dstMacAddr,
+                 pSirMicFailureInd->info.dstMacAddr,
+                 sizeof(tSirMacAddr));
+
+    vos_mem_copy(pSirSmeMicFailureInd->info.rxMacAddr,
+                 pSirMicFailureInd->info.rxMacAddr,
+                 sizeof(tSirMacAddr));
+
+    pSirSmeMicFailureInd->info.multicast =
+                                   pSirMicFailureInd->info.multicast;
+
+    pSirSmeMicFailureInd->info.keyId=
+                                  pSirMicFailureInd->info.keyId;
+
+    pSirSmeMicFailureInd->info.IV1=
+                                  pSirMicFailureInd->info.IV1;
+
+    vos_mem_copy(pSirSmeMicFailureInd->info.TSC,
+                 pSirMicFailureInd->info.TSC,SIR_CIPHER_SEQ_CTR_SIZE);
 
     mmhMsg.type = eWNI_SME_MIC_FAILURE_IND;
     mmhMsg.bodyptr = pSirSmeMicFailureInd;
     mmhMsg.bodyval = 0;
-    MTRACE(macTrace(pMac, TRACE_CODE_TX_SME_MSG, sessionId, mmhMsg.type));
+    MTRACE(macTraceMsgTx(pMac, sessionId, mmhMsg.type));
     limSysProcessMmhMsgApi(pMac, &mmhMsg, ePROT);
     return;
 }
@@ -2624,6 +2506,17 @@ tMgmtFrmDropReason limIsPktCandidateForDrop(tpAniSirGlobal pMac, tANI_U8 *pRxPac
     framelen = WDA_GET_RX_PAYLOAD_LEN(pRxPacketInfo);
     pBody    = WDA_GET_RX_MPDU_DATA(pRxPacketInfo);
 
+    if ((subType == SIR_MAC_MGMT_DEAUTH ||
+         subType == SIR_MAC_MGMT_DISASSOC) &&
+        lim_is_deauth_diassoc_for_drop(pMac, pRxPacketInfo))
+        return eMGMT_DROP_SPURIOUS_FRAME;
+
+#ifdef WLAN_FEATURE_11W
+    if ((subType == SIR_MAC_MGMT_ASSOC_REQ ||
+         subType == SIR_MAC_MGMT_REASSOC_REQ) &&
+        lim_is_assoc_req_for_drop(pMac, pRxPacketInfo))
+        return eMGMT_DROP_SPURIOUS_FRAME;
+#endif
     //Drop INFRA Beacons and Probe Responses in IBSS Mode
     if( (subType == SIR_MAC_MGMT_BEACON) ||
         (subType == SIR_MAC_MGMT_PROBE_RSP))
@@ -2728,33 +2621,4 @@ eHalStatus pe_ReleaseGlobalLock( tAniSirLim *psPe)
         }
     }
     return (status);
-}
-
-/**
- * pe_register_packetdump_callback() - stores rx packet dump
- * callback handler
- * @pe_packetdump_cb: packetdump cb
- *
- * This function is used to store rx packet dump callback
- *
- * Return: None
- *
- */
-void pe_register_packetdump_callback(tp_pe_packetdump_cb pe_packetdump_cb)
-{
-	gpe_packetdump_cb = pe_packetdump_cb;
-}
-
-/**
- * pe_deregister_packetdump_callback() - removes tx packet dump
- * callback handler
- *
- * This function is used to remove rx packet dump callback
- *
- * Return: None
- *
- */
-void pe_deregister_packetdump_callback(void)
-{
-	gpe_packetdump_cb = NULL;
 }

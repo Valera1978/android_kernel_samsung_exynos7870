@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2014,2016-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -39,8 +39,6 @@
 #include "regtable.h"
 #include <vos_getBin.h>
 #include "epping_main.h"
-#include "adf_trace.h"
-#include "vos_api.h"
 
 #define CE_POLL_TIMEOUT 10 /* ms */
 
@@ -51,158 +49,6 @@ extern int hif_pci_war1;
  * Support for Copy Engine hardware, which is mainly used for
  * communication between Host and Target over a PCIe interconnect.
  */
-
-/**
- * enum hif_ce_event_type - HIF copy engine event type
- * @HIF_RX_DESC_POST: event recorded before updating write index of RX ring.
- * @HIF_RX_DESC_COMPLETION: event recorded before updating sw index of RX ring.
- * @HIF_TX_GATHER_DESC_POST: post gather desc. (no write index update)
- * @HIF_TX_DESC_POST: event recorded before updating write index of TX ring.
- * @HIF_TX_DESC_COMPLETION: event recorded before updating sw index of TX ring.
- */
-enum hif_ce_event_type {
-	HIF_RX_DESC_POST,
-	HIF_RX_DESC_COMPLETION,
-	HIF_TX_GATHER_DESC_POST,
-	HIF_TX_DESC_POST,
-	HIF_TX_DESC_COMPLETION,
-};
-
-static struct hif_pci_softc *hif_sc = NULL;
-/**
- * target_reset_work_handler() - Work queue handler to reset target
- * @sc: work queue handle
- */
-void target_reset_work_handler(struct work_struct *sc)
-{
-	if (hif_sc)
-		vos_device_crashed(hif_sc->dev);
-}
-
-static DECLARE_WORK(target_reset_work, target_reset_work_handler);
-
-/**
- * ce_target_reset() - Trigger SSR
- * @sc: hif layer handle
- *
- * Once hw error is hit, SSR would be triggered.
- */
-void ce_target_reset(struct hif_pci_softc *sc)
-{
-	hif_sc = sc;
-	adf_os_warn(1);
-	adf_os_print("Trigger SSR.\n");
-	schedule_work(&target_reset_work);
-}
-
-/**
- * ce_idx_invalid() - check whether a CE index is valid
- * @ring: ring handle
- * @idx: CE idx
- */
-static bool ce_idx_invalid(struct CE_ring_state *ring, unsigned int idx)
-{
-	if (ring->nentries <= idx) {
-		adf_os_print("hw index %d is not correct.\n", idx);
-		return TRUE;
-	} else {
-		return FALSE;
-	}
-}
-
-#ifdef CONFIG_SLUB_DEBUG_ON
-
-/**
- * struct hif_ce_event - structure for detailing a ce event
- * @type: what the event was
- * @time: when it happened
- * @descriptor: descriptor enqueued or dequeued
- * @memory: virtual address that was used
- * @index: location of the descriptor in the ce ring;
- */
-struct hif_ce_desc_event {
-	uint16_t index;
-	enum hif_ce_event_type type;
-	uint64_t time;
-	CE_desc descriptor;
-	void* memory;
-};
-
-/* max history to record per copy engine */
-#define HIF_CE_HISTORY_MAX 512
-adf_os_atomic_t hif_ce_desc_history_index[CE_COUNT_MAX];
-struct hif_ce_desc_event hif_ce_desc_history[CE_COUNT_MAX][HIF_CE_HISTORY_MAX];
-static void CE_init_ce_desc_event_log(int ce_id, int size);
-
-/**
- * get_next_record_index() - get the next record index
- * @table_index: atomic index variable to increment
- * @array_size: array size of the circular buffer
- *
- * Increment the atomic index and reserve the value.
- * Takes care of buffer wrap.
- * Guaranteed to be thread safe as long as fewer than array_size contexts
- * try to access the array.  If there are more than array_size contexts
- * trying to access the array, full locking of the recording process would
- * be needed to have sane logging.
- */
-int get_next_record_index(adf_os_atomic_t *table_index, int array_size)
-{
-	int record_index = adf_os_atomic_inc_return(table_index);
-	if (record_index == array_size)
-		adf_os_atomic_sub(array_size, table_index);
-
-	while (record_index >= array_size)
-		record_index -= array_size;
-	return record_index;
-}
-
-/**
- * hif_record_ce_desc_event() - record ce descriptor events
- * @ce_id: which ce is the event occuring on
- * @type: what happened
- * @descriptor: pointer to the descriptor posted/completed
- * @memory: virtual address of buffer related to the descriptor
- * @index: index that the descriptor was/will be at.
- */
-static void hif_record_ce_desc_event(int ce_id, enum hif_ce_event_type type,
-		CE_desc *descriptor, void *memory, int index)
-{
-	int record_index = get_next_record_index(
-			&hif_ce_desc_history_index[ce_id], HIF_CE_HISTORY_MAX);
-
-	struct hif_ce_desc_event *event =
-		&hif_ce_desc_history[ce_id][record_index];
-	event->type = type;
-	event->time = adf_get_boottime();
-	event->descriptor = *descriptor;
-	event->memory = memory;
-	event->index = index;
-}
-
-/**
- * CE_init_ce_desc_event_log() - initialize the ce event log
- * @ce_id: copy engine id for which we are initializing the log
- * @size: size of array to dedicate
- *
- * Currently the passed size is ignored in favor of a precompiled value.
- */
-static void CE_init_ce_desc_event_log(int ce_id, int size)
-{
-	adf_os_atomic_init(&hif_ce_desc_history_index[ce_id]);
-}
-#else
-static inline void hif_record_ce_desc_event(
-		int ce_id, enum hif_ce_event_type type,
-		CE_desc *descriptor, void* memory,
-		int index)
-{
-}
-
-static inline void CE_init_ce_desc_event_log(int ce_id, int size)
-{
-}
-#endif
 
 /*
  * A single CopyEngine (CE) comprises two "rings":
@@ -314,7 +160,6 @@ CE_send_nolock(struct CE_handle *copyeng,
         return status;
     }
     {
-        enum hif_ce_event_type event_type = HIF_TX_GATHER_DESC_POST;
         struct CE_src_desc *src_ring_base = (struct CE_src_desc *)src_ring->base_addr_owner_space;
         struct CE_src_desc *shadow_base = (struct CE_src_desc *)src_ring->shadow_base;
         struct CE_src_desc *src_desc = CE_SRC_RING_TO_DESC(src_ring_base, write_index);
@@ -342,19 +187,10 @@ CE_send_nolock(struct CE_handle *copyeng,
         /* Update Source Ring Write Index */
         write_index = CE_RING_IDX_INCR(nentries_mask, write_index);
 
-
         /* WORKAROUND */
         if (!shadow_src_desc->gather) {
-            event_type = HIF_TX_DESC_POST;
             WAR_CE_SRC_RING_WRITE_IDX_SET(sc, targid, ctrl_addr, write_index);
         }
-
-        /* src_ring->write index hasn't been updated event though the register
-         * has allready been written to.
-         */
-        hif_record_ce_desc_event(CE_state->id, event_type,
-                        (CE_desc *) shadow_src_desc, per_transfer_context,
-                        src_ring->write_index);
 
         src_ring->write_index = write_index;
         status = A_OK;
@@ -466,12 +302,6 @@ CE_sendlist_send(struct CE_handle *copyeng,
                                 (CE_addr_t)item->data, item->u.nbytes,
                                 transfer_id, item->flags);
         A_ASSERT(status == A_OK);
-        NBUF_UPDATE_TX_PKT_COUNT((adf_nbuf_t)per_transfer_context,
-                              NBUF_TX_PKT_CE);
-        DPTRACE(adf_dp_trace((adf_nbuf_t)per_transfer_context,
-                ADF_DP_TRACE_CE_PACKET_PTR_RECORD,
-               (uint8_t *)&(((adf_nbuf_t)per_transfer_context)->data),
-               sizeof(((adf_nbuf_t)per_transfer_context)->data), ADF_TX));
     } else {
         /*
          * Probably not worth the additional complexity to support
@@ -522,10 +352,6 @@ CE_recv_buf_enqueue(struct CE_handle *copyeng,
 								desc update */
 
         dest_ring->per_transfer_context[write_index] = per_recv_context;
-
-        hif_record_ce_desc_event(CE_state->id, HIF_RX_DESC_POST,
-                        (CE_desc *) dest_desc, per_recv_context,
-                        write_index);
 
         /* Update Destination Ring Write Index */
         write_index = CE_RING_IDX_INCR(nentries_mask, write_index);
@@ -729,11 +555,6 @@ CE_completed_recv_next_nolock(struct CE_state *CE_state,
         goto done;
     }
 
-    hif_record_ce_desc_event(CE_state->id, HIF_RX_DESC_COMPLETION,
-                        (CE_desc *) dest_desc,
-                        dest_ring->per_transfer_context[sw_index],
-                        sw_index);
-
     dest_desc->info.nbytes = 0;
 
     /* Return data from completed destination descriptor */
@@ -873,9 +694,6 @@ CE_completed_send_next_nolock(struct CE_state *CE_state,
         A_TARGET_ACCESS_BEGIN_RET(targid);
         src_ring->hw_index = CE_SRC_RING_READ_IDX_GET(targid, ctrl_addr);
         A_TARGET_ACCESS_END_RET(targid);
-
-        if (ce_idx_invalid(src_ring, src_ring->hw_index))
-            return status;
     }
     read_index = src_ring->hw_index;
 
@@ -888,11 +706,6 @@ CE_completed_send_next_nolock(struct CE_state *CE_state,
     if ((read_index != sw_index) && (read_index != 0xffffffff)) {
         struct CE_src_desc *shadow_base = (struct CE_src_desc *)src_ring->shadow_base;
         struct CE_src_desc *shadow_src_desc = CE_SRC_RING_TO_DESC(shadow_base, sw_index);
-
-        hif_record_ce_desc_event(CE_state->id, HIF_TX_DESC_COMPLETION,
-                        (CE_desc *) shadow_src_desc,
-                        src_ring->per_transfer_context[sw_index],
-                        sw_index);
 
         /* Return data from completed source descriptor */
         *bufferp      = (CE_addr_t)(shadow_src_desc->src_ptr);
@@ -1072,52 +885,6 @@ CE_per_engine_servicereap(struct hif_pci_softc *sc, unsigned int CE_id)
 
 #endif /*ATH_11AC_TXCOMPACT*/
 
-/**
- * ce_is_valid_entries() - check if ce ring delta is valid
- * @sc: pointer to hif_pci_softc
- * @ce_state: pointer to CE_state
- * @ring_delta: delta packets in CE ring
- *
- * check if difference between hw index and read index is
- * with in limit.
- *
- * Return: true if ring delta is valid.
- */
-static inline bool ce_is_valid_entries(struct hif_pci_softc *sc,
-		struct CE_state *ce_state, unsigned int ring_delta)
-{
-	bool status;
-	A_target_id_t targid = TARGID(sc);
-	unsigned int hw_index =
-			CE_DEST_RING_READ_IDX_GET(targid, ce_state->ctrl_addr);
-
-	/* check if difference between hw index and read index is with in
-	* nentries_mask limit.
-	*/
-	if ((ring_delta < ce_state->dest_ring->nentries_mask) &&
-		(hw_index != CE_HW_INDEX_LINK_DOWN)) {
-		adf_os_print("%s: spent more time during rx proceesing for CE%d, allow other CE to process Rx packet.\n",
-				__func__, ce_state->id);
-		status = true;
-	} else if (hw_index  == CE_HW_INDEX_LINK_DOWN) {
-		status = false;
-		adf_os_print("%s: hw index is invalid due to link down \n", __func__);
-	} else {
-		adf_os_print("%s:Potential infinite loop detected during rx processing for CE%d\n",
-			__func__, ce_state->id);
-		ce_target_reset(sc);
-		status = false;
-	}
-
-	adf_os_print("nentries_mask:0x%x sw read_idx:0x%x hw read_idx:0x%x ring_delta:0x%x\n",
-		ce_state->dest_ring->nentries_mask,
-		ce_state->dest_ring->sw_index,
-		CE_DEST_RING_READ_IDX_GET(targid, ce_state->ctrl_addr),
-		ring_delta);
-
-	return status;
-}
-
 /*
  * Number of times to check for any pending tx/rx completion on
  * a copy engine, this count should be big enough. Once we hit
@@ -1150,9 +917,6 @@ CE_per_engine_service(struct hif_pci_softc *sc, unsigned int CE_id)
     unsigned int more_comp_cnt = 0;
     unsigned int more_snd_comp_cnt = 0;
     unsigned int sw_idx, hw_idx;
-    bool is_pkt_pending = 0;
-    unsigned int ring_delta = 0;
-
 
     A_TARGET_ACCESS_BEGIN(targid);
 
@@ -1260,16 +1024,16 @@ more_watermarks:
      * misc interrupts.Go back and check again.Keep checking until
      * we find no more events to process.
      */
-    if (CE_state->recv_cb) {
-        ring_delta = CE_recv_entries_done_nolock(sc, CE_state);
-        if(ring_delta) {
-            if (WLAN_IS_EPPING_ENABLED(vos_get_conparam()) ||
-                more_comp_cnt++ < CE_TXRX_COMP_CHECK_THRESHOLD) {
-                goto more_completions;
-            } else {
-                if (ce_is_valid_entries(sc, CE_state, ring_delta))
-                    is_pkt_pending = true;
-            }
+    if (CE_state->recv_cb && CE_recv_entries_done_nolock(sc, CE_state)) {
+        if (WLAN_IS_EPPING_ENABLED(vos_get_conparam()) ||
+            more_comp_cnt++ < CE_TXRX_COMP_CHECK_THRESHOLD) {
+            goto more_completions;
+        } else {
+            adf_os_print("%s:Potential infinite loop detected during Rx processing"
+                         "nentries_mask:0x%x sw read_idx:0x%x hw read_idx:0x%x\n",
+                        __func__, CE_state->dest_ring->nentries_mask,
+                        CE_state->dest_ring->sw_index,
+                        CE_DEST_RING_READ_IDX_GET(targid, CE_state->ctrl_addr));
         }
     }
 
@@ -1278,7 +1042,7 @@ more_watermarks:
             more_snd_comp_cnt++ < CE_TXRX_COMP_CHECK_THRESHOLD) {
             goto more_completions;
         } else {
-            adf_os_print("%s:Potential infinite loop detected during send completion "
+            adf_os_print("%s:Potential infinite loop detected during send completion"
                          "nentries_mask:0x%x sw read_idx:0x%x hw read_idx:0x%x\n",
                          __func__, CE_state->src_ring->nentries_mask,
                          CE_state->src_ring->sw_index,
@@ -1297,10 +1061,7 @@ more_watermarks:
     }
 
     adf_os_spin_unlock(&sc->target_lock);
-    if (is_pkt_pending)
-        adf_os_atomic_set(&CE_state->rx_pending, 1);
-    else
-        adf_os_atomic_set(&CE_state->rx_pending, 0);
+    adf_os_atomic_set(&CE_state->rx_pending, 0);
     A_TARGET_ACCESS_END(targid);
 }
 
@@ -1613,9 +1374,6 @@ CE_init(struct hif_pci_softc *sc,
     } else {
         CE_state->src_sz_max = attr->src_sz_max;
     }
-
-    CE_init_ce_desc_event_log(CE_id,
-               attr->src_nentries + attr->dest_nentries);
 
     /* source ring setup */
     nentries = attr->src_nentries;

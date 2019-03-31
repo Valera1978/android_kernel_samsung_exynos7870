@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -64,6 +64,16 @@ typedef enum
 // classifier ID is coded as 0-3: tsid, 4-5:direction
 #define LIM_MAKE_CLSID(tsid, dir) (((tsid) & 0x0F) | (((dir) & 0x03) << 4))
 
+#define LIM_SET_STA_BA_STATE(pSta, tid, newVal) \
+{\
+    pSta->baState = ((pSta->baState | (0x3 << tid*2)) & ((newVal << tid*2) | ~(0x3 << tid*2)));\
+}
+
+#define LIM_GET_STA_BA_STATE(pSta, tid, pCurVal)\
+{\
+    *pCurVal = (tLimBAState)(((pSta->baState >> tid*2) & 0x3));\
+}
+
 #define VHT_MCS_3x3_MASK    0x30
 #define VHT_MCS_2x2_MASK    0x0C
 
@@ -79,8 +89,6 @@ typedef struct sAddBaCandidate
     tSirMacAddr staAddr;
     tAddBaInfo baInfo[STACFG_MAX_TC];
 }tAddBaCandidate, *tpAddBaCandidate;
-
-#define MGMT_RX_PACKETS_THRESHOLD 200
 
 #ifdef WLAN_FEATURE_11W
 typedef union uPmfSaQueryTimerId
@@ -346,18 +354,56 @@ tANI_U32 result = 1, i;
   return result;
 }
 
+
+
+tSirRetStatus limPostMlmAddBAReq( tpAniSirGlobal pMac,
+    tpDphHashNode pStaDs,
+    tANI_U8 tid, tANI_U16 startingSeqNum,tpPESession psessionEntry);
+tSirRetStatus limPostMlmAddBARsp( tpAniSirGlobal pMac,
+    tSirMacAddr peerMacAddr,
+    tSirMacStatusCodes baStatusCode,
+    tANI_U8 baDialogToken,
+    tANI_U8 baTID,
+    tANI_U8 baPolicy,
+    tANI_U16 baBufferSize,
+    tANI_U16 baTimeout,
+    tpPESession psessionEntry);
+tSirRetStatus limPostMlmDelBAReq( tpAniSirGlobal pMac,
+    tpDphHashNode pSta,
+    tANI_U8 baDirection,
+    tANI_U8 baTID,
+    tSirMacReasonCodes baReasonCode ,
+    tpPESession psessionEntry);
+tSirRetStatus limPostMsgAddBAReq( tpAniSirGlobal pMac,
+    tpDphHashNode pSta,
+    tANI_U8 baDialogToken,
+    tANI_U8 baTID,
+    tANI_U8 baPolicy,
+    tANI_U16 baBufferSize,
+    tANI_U16 baTimeout,
+    tANI_U16 baSSN,
+    tANI_U8 baDirection,
+    tpPESession psessionEntry);
+tSirRetStatus limPostMsgDelBAInd( tpAniSirGlobal pMac,
+    tpDphHashNode pSta,
+    tANI_U8 baTID,
+    tANI_U8 baDirection,
+    tpPESession psessionEntry);
+
 tSirRetStatus limPostSMStateUpdate(tpAniSirGlobal pMac,
     tANI_U16 StaIdx,
     tSirMacHTMIMOPowerSaveState MIMOPSState,
     tANI_U8 *pPeerStaMac, tANI_U8 sessionId);
 
 void limDeleteStaContext(tpAniSirGlobal pMac, tpSirMsgQ limMsg);
+void limProcessAddBaInd(tpAniSirGlobal pMac, tpSirMsgQ limMsg);
+void limDeleteBASessions(tpAniSirGlobal pMac, tpPESession pSessionEntry, tANI_U32 baDirection);
+void limDelPerBssBASessionsBtc(tpAniSirGlobal pMac);
+void limDelAllBASessions(tpAniSirGlobal pMac);
 void limDeleteDialogueTokenList(tpAniSirGlobal pMac);
 tSirRetStatus limSearchAndDeleteDialogueToken(tpAniSirGlobal pMac, tANI_U8 token, tANI_U16 assocId, tANI_U16 tid);
 void limRessetScanChannelInfo(tpAniSirGlobal pMac);
 void limAddScanChannelInfo(tpAniSirGlobal pMac, tANI_U8 channelId);
-void lim_add_channel_status_info(tpAniSirGlobal p_mac,
-	struct lim_channel_status *channel_stat, uint8_t channel_id);
 
 tANI_U8 limGetChannelFromBeacon(tpAniSirGlobal pMac, tpSchBeaconStruct pBeacon);
 tSirNwType limGetNwType(tpAniSirGlobal pMac, tANI_U8 channelNum, tANI_U32 type, tpSchBeaconStruct pBeacon);
@@ -408,13 +454,15 @@ uint32_t lim_get_max_rate_flags(tpAniSirGlobal mac_ctx, tpDphHashNode sta_ds);
 
 #ifdef WLAN_FEATURE_11AC
 tANI_BOOLEAN limCheckVHTOpModeChange( tpAniSirGlobal pMac, tpPESession psessionEntry,
-                                      tANI_U8 chanWidth, tANI_U8 chanMode, tANI_U8 staId, tANI_U8 *peerMac);
+                                      tANI_U8 chanWidth, tANI_U8 staId, tANI_U8 *peerMac);
 tANI_BOOLEAN limSetNssChange( tpAniSirGlobal pMac, tpPESession psessionEntry,
                               tANI_U8 rxNss, tANI_U8 staId, tANI_U8 *peerMac);
 tANI_BOOLEAN limCheckMembershipUserPosition( tpAniSirGlobal pMac, tpPESession psessionEntry,
                                              tANI_U32 membership, tANI_U32 userPosition,
                                              tANI_U8 staId);
 #endif
+
+#ifdef FEATURE_WLAN_DIAG_SUPPORT
 
 typedef enum
 {
@@ -492,18 +540,10 @@ typedef enum
     WLAN_PE_DIAG_ROAM_ASSOC_COMP_EVENT,
     RESERVED1, /* = 72 for SCAN_COMPLETE */
     RESERVED2, /*  = 73 for SCAN_RES_FOUND */
-    WLAN_PE_DIAG_ASSOC_TIMEOUT,
-    WLAN_PE_DIAG_AUTH_TIMEOUT,
 } WLAN_PE_DIAG_EVENT_TYPE;
 
-#ifdef FEATURE_WLAN_DIAG_SUPPORT
 void limDiagEventReport(tpAniSirGlobal pMac, tANI_U16 eventType, tpPESession pSessionEntry, tANI_U16 status, tANI_U16 reasonCode);
-#else
-static inline void limDiagEventReport(tpAniSirGlobal pMac, tANI_U16 eventType,
-			tpPESession pSessionEntry, tANI_U16 status,
-			tANI_U16 reasonCode)
-{
-}
+
 #endif /* FEATURE_WLAN_DIAG_SUPPORT */
 
 void peSetResumeChannel(tpAniSirGlobal pMac, tANI_U16 channel, ePhyChanBondState cbState);
@@ -621,48 +661,7 @@ void lim_update_extcap_struct(tpAniSirGlobal mac_ctx, uint8_t *buf,
 			       tDot11fIEExtCap *ext_cap);
 tSirRetStatus lim_strip_extcap_update_struct(tpAniSirGlobal mac_ctx,
 		uint8_t* addn_ie, uint16_t *addn_ielen, tDot11fIEExtCap *dst);
-void lim_merge_extcap_struct(tDot11fIEExtCap *dst, tDot11fIEExtCap *src,
-			bool add);
+void lim_merge_extcap_struct(tDot11fIEExtCap *dst, tDot11fIEExtCap *src);
 uint8_t
 lim_get_80Mhz_center_channel(uint8_t primary_channel);
-tANI_U8 lim_compute_ext_cap_ie_length (tDot11fIEExtCap *ext_cap);
-bool lim_is_robust_mgmt_action_frame(uint8_t action_catagory);
-void lim_update_caps_info_for_bss(tpAniSirGlobal mac_ctx,
-				uint16_t *caps, uint16_t bss_caps);
-void lim_parse_beacon_for_tim(tpAniSirGlobal mac_ctx, uint8_t* rx_packet_info,
-	tpPESession session);
-eHalStatus limP2PActionCnf(tpAniSirGlobal mac_ctx,
-				uint32_t tx_complete_success);
-
-void lim_send_chan_switch_action_frame(tpAniSirGlobal mac_ctx,
-	uint16_t new_channel, uint8_t ch_bandwidth,
-	tpPESession session_entry);
-/**
- * lim_check_if_vendor_oui_match() - Check if the given OUI match in IE buffer
- * @mac_ctx: MAC context
- * @ie: IE buffer
- * @oui: OUI string
- * @oui_len: length of @oui
- * @ie_len: length of @ie
- *
- * This API is used to check if given vendor OUI
- * matches in given IE buffer
- *
- * Return: True, if mataches. False otherwise
- */
-bool lim_check_if_vendor_oui_match(tpAniSirGlobal mac_ctx,
-                uint8_t *oui, uint8_t oui_len,
-                uint8_t *ie, uint8_t ie_len);
-
-/**
- * lim_decrement_pending_mgmt_count: Decrement mgmt frame count
- * @mac_ctx: Pointer to global MAC structure
- *
- * This function is used to decrement pe mgmt count once frame
- * removed from queue
- *
- * Return: None
- */
-void lim_decrement_pending_mgmt_count(tpAniSirGlobal mac_ctx);
-
 #endif /* __LIM_UTILS_H */

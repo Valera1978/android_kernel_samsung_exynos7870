@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -53,7 +53,7 @@
 
 #define USB_HIF_USE_SINGLE_PIPE_FOR_DATA
 #define USB_HIF_TARGET_CREDIT_SIZE  1664
-#ifdef WLAN_DEBUG
+#ifdef DEBUG
 static ATH_DEBUG_MASK_DESCRIPTION g_HIFDebugDescription[] = {
 	{USB_HIF_DEBUG_CTRL_TRANS, "Control Transfers"},
 	{USB_HIF_DEBUG_BULK_IN, "BULK In Transfers"},
@@ -245,25 +245,17 @@ static A_STATUS HIFSend_internal(HIF_DEVICE *hifDevice, a_uint8_t PipeID,
 	int usb_status;
 	int i;
 	struct HIFSendContext *pSendContext;
-	uint8_t frag_count;
-	uint32_t head_data_len, tmp_frag_count = 0;
+	int frag_count = 0, head_data_len, tmp_frag_count = 0;
 	unsigned char *pData;
 
-	AR_DEBUG_PRINTF(USB_HIF_DEBUG_BULK_OUT, ("+%s pipe : %d, buf:0x%pK\n",
+	AR_DEBUG_PRINTF(USB_HIF_DEBUG_BULK_OUT, ("+%s pipe : %d, buf:0x%p\n",
 			__func__, PipeID, buf));
 
 	a_mem_trace(buf);
 
 	frag_count = adf_nbuf_get_num_frags(buf);
-	if (frag_count == 1) {
-		/*
-		 * | HIFSendContext | netbuf->data
-		 */
-		head_data_len = sizeof(struct HIFSendContext);
-	} else if ((frag_count - 1) <= CVG_NBUF_MAX_EXTRA_FRAGS) {
-		/*
-		 * means have extra fragment buf in skb
-		 * header data length should be total sending length substract
+	if (frag_count > 1) {	/* means have extra fragment buf in skb */
+		/* header data length should be total sending length substract
 		 * internal data length of netbuf
 		 * | HIFSendContext | fragments except internal buffer |
 		 * netbuf->data
@@ -276,12 +268,10 @@ static A_STATUS HIFSend_internal(HIF_DEVICE *hifDevice, a_uint8_t PipeID,
 			tmp_frag_count = tmp_frag_count + 1;
 		}
 	} else {
-		/* Extra fragments overflow */
-		AR_DEBUG_PRINTF(ATH_DEBUG_ERR, (
-			"%s Extra fragments count overflow : %d\n",
-			__func__, frag_count));
-		status = A_ERROR;
-		goto exit;
+		/*
+		 * | HIFSendContext | netbuf->data
+		 */
+		head_data_len = sizeof(struct HIFSendContext);
 	}
 
 	/* Check whether head room is enough to save extra head data */
@@ -376,7 +366,6 @@ static A_STATUS HIFSend_internal(HIF_DEVICE *hifDevice, a_uint8_t PipeID,
 
 	} while (FALSE);
 
-exit:
 	if (A_FAILED(status) && (status != A_NO_RESOURCE)) {
 		AR_DEBUG_PRINTF(ATH_DEBUG_ERR,
 				("athusb send failed %d\n", status));
@@ -482,7 +471,6 @@ static HIF_DEVICE_USB *usb_hif_create(struct usb_interface *interface)
 		spin_lock_init(&(device->cs_lock));
 		spin_lock_init(&(device->rx_lock));
 		spin_lock_init(&(device->tx_lock));
-		spin_lock_init(&(device->rx_prestart_lock));
 		device->udev = dev;
 		device->interface = interface;
 
@@ -916,7 +904,7 @@ void HIFDumpInfo(HIF_DEVICE *hif)
 		ep_desc = &iface_desc->endpoint[i].desc;
 		if (ep_desc) {
 			pr_info(
-			     "ep_desc : %pK Index : %d: DescType : %d Addr : %d Maxp : %d Atrrib : %d\n",
+			     "ep_desc : %p Index : %d: DescType : %d Addr : %d Maxp : %d Atrrib : %d\n",
 			     ep_desc, i,
 			     ep_desc->bDescriptorType,
 			     ep_desc->bEndpointAddress, ep_desc->wMaxPacketSize,
@@ -1058,18 +1046,4 @@ void HIFSetBundleMode(HIF_DEVICE *hif_device, bool enabled, int rx_bundle_cnt)
 			("athusb bundle %s cnt %d\n",
 			 enabled ? "enabled" : "disabled",
 			 rx_bundle_cnt));
-}
-
-/**
- * hif_is_80211_fw_wow_required() - API to check if target suspend is needed
- *
- * API determines if fw can be suspended and returns true/false to the caller.
- * Caller will call WMA WoW API's to suspend.
- * This API returns true only for SDIO bus types, for others it's a false.
- *
- * Return: bool
- */
-bool hif_is_80211_fw_wow_required(void)
-{
-	return true;
 }

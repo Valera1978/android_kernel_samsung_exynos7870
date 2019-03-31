@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2014, 2016-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -31,7 +31,6 @@
 #if defined(HIF_PCI)
 #include "if_pci.h"
 #endif
-#include <vos_api.h>
 
 extern unsigned int htc_credit_flow;
 
@@ -58,11 +57,8 @@ A_STATUS HTCConnectService(HTC_HANDLE               HTCHandle,
     A_UINT16                            conn_flags;
     A_UINT16                            rsp_msg_id, rsp_msg_serv_id, rsp_msg_max_msg_size;
     A_UINT8                             rsp_msg_status, rsp_msg_end_id, rsp_msg_serv_meta_len;
-#ifdef HIF_SDIO
-    A_UINT8                             rsp_msg_enable_b2b = 0;
-#endif
 
-    AR_DEBUG_PRINTF(ATH_DEBUG_TRC, ("+HTCConnectService, target:%pK SvcID:0x%X \n",
+    AR_DEBUG_PRINTF(ATH_DEBUG_TRC, ("+HTCConnectService, target:%p SvcID:0x%X \n",
                                     target, pConnectReq->ServiceID));
 
     do {
@@ -141,12 +137,6 @@ A_STATUS HTCConnectService(HTC_HANDLE               HTCHandle,
                             SERVICEMETALENGTH, pConnectReq->MetaDataLength);
             }
 
-#ifdef HIF_SDIO
-            HTC_SET_FIELD(pConnectMsg, HTC_CONNECT_SERVICE_MSG,
-                            LOOKAHEADV2, HIF_BUNDLE_DIFF_BLK_FRAMES);
-            AR_DEBUG_PRINTF(ATH_DEBUG_ERR, ("HTCConnectService, host indicate %s b2b bundle\n",
-                                            (HIF_BUNDLE_DIFF_BLK_FRAMES == 1) ? "support" : "not support"));
-#endif
             SET_HTC_PACKET_INFO_TX(pSendPacket,
                                    NULL,
                                    (A_UINT8 *)pConnectMsg,
@@ -183,6 +173,7 @@ A_STATUS HTCConnectService(HTC_HANDLE               HTCHandle,
             rsp_msg_serv_meta_len = HTC_GET_FIELD(pResponseMsg,
                     HTC_CONNECT_SERVICE_RESPONSE_MSG, SERVICEMETALENGTH);
 
+
             if ((rsp_msg_id != HTC_MSG_CONNECT_SERVICE_RESPONSE_ID) ||
                 (target->CtrlResponseLength < sizeof(HTC_CONNECT_SERVICE_RESPONSE_MSG))) {
                     /* this message is not valid */
@@ -209,14 +200,6 @@ A_STATUS HTCConnectService(HTC_HANDLE               HTCHandle,
 #endif /* QCA_TX_HTT2_SUPPORT */
                 break;
             }
-
-#ifdef HIF_SDIO
-            rsp_msg_enable_b2b = HTC_GET_FIELD(pResponseMsg,
-                    HTC_CONNECT_SERVICE_RESPONSE_MSG, LOOKAHEADV2);
-            AR_DEBUG_PRINTF(ATH_DEBUG_ERR, ("HTCConnectService, firmware decide to %s b2b bundle\n",
-                                            (rsp_msg_enable_b2b == 1) ? "enabled" : "disabled"));
-            target->enable_b2b = (rsp_msg_enable_b2b == 1) ? TRUE : FALSE;
-#endif
 
             assignedEndpoint = (HTC_ENDPOINT_ID)rsp_msg_end_id;
             maxMsgSize = rsp_msg_max_msg_size;
@@ -343,25 +326,6 @@ A_STATUS HTCConnectService(HTC_HANDLE               HTCHandle,
     AR_DEBUG_PRINTF(ATH_DEBUG_TRC, ("-HTCConnectService \n"));
 
     return status;
-}
-
-void htc_disconnect_service(HTC_ENDPOINT_ID endpoint_id)
-{
-    void *vos_ctx = vos_get_global_context(VOS_MODULE_ID_HTC, NULL);
-    HTC_HANDLE *htc_hdl = vos_get_context(VOS_MODULE_ID_HTC, vos_ctx);
-    HTC_TARGET *target;
-    HTC_ENDPOINT *endpoint;
-
-    if (htc_hdl == NULL)
-        return;
-
-    target = GET_HTC_TARGET_FROM_HANDLE(htc_hdl);
-    endpoint = &target->EndPoint[endpoint_id];
-
-    LOCK_HTC_ENDPOINT_RX(endpoint);
-    endpoint->EpCallBacks.EpRecv = NULL;
-    UNLOCK_HTC_ENDPOINT_RX(endpoint);
-    return;
 }
 
 

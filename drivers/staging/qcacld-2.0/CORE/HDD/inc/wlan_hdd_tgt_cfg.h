@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -58,8 +58,6 @@ struct hdd_tgt_services {
 #ifdef SAP_AUTH_OFFLOAD
         bool sap_auth_offload_service;
 #endif
-        bool get_peer_info_enabled;
-	bool wow_support;
 };
 
 struct hdd_tgt_ht_cap {
@@ -107,20 +105,6 @@ struct hdd_tgt_cfg {
         v_U8_t lpss_support;
 #endif
         uint8_t ap_arpns_support;
-#ifdef FEATURE_GREEN_AP
-        bool egap_support;
-#endif
-        uint32_t fine_time_measurement_cap;
-        bool bpf_enabled;
-#ifdef FEATURE_WLAN_RA_FILTERING
-        bool is_ra_rate_limit_enabled;
-#endif
-        uint16_t wmi_max_len;
-#ifdef WLAN_FEATURE_NAN_DATAPATH
-        bool nan_datapath_enabled;
-#endif
-        uint8_t max_mc_addr_list;
-        bool sub_20_support;
 };
 
 struct hdd_dfs_radar_ind {

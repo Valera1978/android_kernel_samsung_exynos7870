@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2014, 2016-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -38,20 +38,14 @@
 
 #include <ol_txrx_api.h> /* ol_txrx_pdev_handle */
 
-#ifdef CONFIG_HL_SUPPORT
-static inline u_int16_t *
-ol_tx_msdu_id_storage(adf_nbuf_t msdu)
-{
-    return NBUF_CB_ID(msdu);
-}
-#else
+
 static inline u_int16_t *
 ol_tx_msdu_id_storage(adf_nbuf_t msdu)
 {
     adf_os_assert(adf_nbuf_headroom(msdu) >= (sizeof(u_int16_t) * 2 - 1));
     return (u_int16_t *) (((adf_os_size_t) (adf_nbuf_head(msdu) + 1)) & ~0x1);
 }
-#endif
+
 
 /**
  * @brief Tx MSDU download completion for a LL system
@@ -140,11 +134,6 @@ enum htt_tx_status {
 
     /* peer_del - tx completion for alreay deleted peer used for HL case */
     htt_tx_status_peer_del = HTT_TX_COMPL_IND_STAT_PEER_DEL,
-
-#if defined(CONFIG_HL_SUPPORT)
-    /* failure notify */
-    htt_tx_status_fail_notify = HTT_TX_COMPL_IND_STAT_FAIL_NOTIFY,
-#endif
 };
 
 /**
@@ -167,14 +156,16 @@ enum htt_tx_status {
  * @param num_msdus - how many MSDUs are referenced by the tx completion
  *      message
  * @param status - whether transmission was successful
- * @param msg_word -  the tx completion message
+ * @param tx_msdu_id_iterator - abstract method of finding the IDs for the
+ *      individual MSDUs referenced by the tx completion message, via the
+ *      htt_tx_compl_desc_id API function
  */
 void
 ol_tx_completion_handler(
     ol_txrx_pdev_handle pdev,
     int num_msdus,
     enum htt_tx_status status,
-    void *msg_word);
+    void *tx_msdu_id_iterator);
 
 void
 ol_tx_credit_completion_handler(ol_txrx_pdev_handle pdev, int credits);
@@ -318,18 +309,6 @@ ol_tx_single_completion_handler(
 void
 ol_tx_target_credit_update(struct ol_txrx_pdev_t *pdev, int credit_delta);
 
-/**
- * @brief Decrement target credit value
- * @details
- *  Function to read the target credit value atomically and decrement
- *  if valid credit is available.
- *
- * @param pdev - the data physical device that sent the tx frames
- * @param credit - value to be decremented
- * @return success if decremented, else error
- */
-int
-ol_tx_target_credit_dec(struct ol_txrx_pdev_t *pdev, int credit);
 
 /**
  * @brief Process an rx indication message sent by the target.
@@ -365,44 +344,6 @@ ol_rx_indication_handler(
     u_int16_t peer_id,
     u_int8_t tid,
     int num_mpdu_ranges);
-
-/**
- * ol_rx_mon_indication_handler - brief Process an rx indication message
- * sent by the target in monitor mode (only for HL, LL is in another path).
- *
- * The target sends a rx indication message to the host as a
- * notification that there are new rx frames available for the
- * host to process.
- * The HTT host layer locates the rx descriptors and rx frames
- * associated with the indication, and calls this function to
- * invoke the rx data processing on the new frames.
- * (For LL, the rx descriptors and frames are delivered directly
- * to the host via MAC DMA, while for HL the rx descriptor and
- * frame for individual frames are combined with the rx indication
- * message.)
- * All MPDUs referenced by a rx indication message belong to the
- * same peer-TID.
- *
- * @pdev:            the data physical device that received the frames
- *                   (registered with HTT as a context pointer during
- *                   attach time)
- * @rx_ind_msg:      the network buffer holding the rx indication message
- *                   (For HL, this netbuf also holds the rx desc and rx
- *                   payload, but the data SW is agnostic to whether the
- *                   desc and payload are piggybacked with the rx indication
- *                   message.)
- * @peer_id: which peer sent this rx data
- * @tid:             what (extended) traffic type the rx data is
- * @num_mpdu_ranges: how many ranges of MPDUs does the message describe.
- *                   Each MPDU within the range has the same rx status.
- */
-void
-ol_rx_mon_indication_handler(
-	ol_txrx_pdev_handle pdev,
-	adf_nbuf_t rx_ind_msg,
-	u_int16_t peer_id,
-	u_int8_t tid,
-	int num_mpdu_ranges);
 
 /**
  * @brief Process an rx fragment indication message sent by the target.
@@ -448,7 +389,7 @@ void
 ol_rx_offload_deliver_ind_handler(
     ol_txrx_pdev_handle pdev,
     adf_nbuf_t msg,
-    u_int16_t msdu_cnt);
+    int msdu_cnt);
 
 /**
  * @brief Process a peer map message sent by the target.
@@ -670,8 +611,8 @@ ol_rx_pn_ind_handler(
     ol_txrx_pdev_handle pdev,
     u_int16_t peer_id,
     u_int8_t tid,
-    u_int16_t seq_num_start,
-    u_int16_t seq_num_end,
+    int seq_num_start,
+    int seq_num_end,
     u_int8_t pn_ie_cnt,
     u_int8_t *pn_ie);
 
@@ -696,7 +637,7 @@ ol_rx_pn_ind_handler(
 void
 ol_txrx_fw_stats_handler(
     ol_txrx_pdev_handle pdev,
-    u_int8_t cookie,
+    u_int64_t cookie,
     u_int8_t *stats_info_list);
 
 /**
@@ -783,70 +724,4 @@ u_int32_t ol_tx_get_max_tx_groups_supported(struct ol_txrx_pdev_t *pdev);
 #define OL_TX_GET_MAX_GROUPS(pdev) 0
 #endif
 
-#ifdef MAC_NOTIFICATION_FEATURE
-/**
- * ol_tx_failure_cb_set() - add TX failure callback
- * @pdev: PDEV TXRX handle
- * @tx_failure_cb: TX failure callback
- */
-void
-ol_tx_failure_cb_set(struct ol_txrx_pdev_t *pdev,
-		     void (*tx_failure_cb)(void *ctx,
-					   unsigned int num_msdu,
-					   unsigned char tid,
-					   unsigned int status));
-
-/**
- * ol_tx_failure_indication() - indicate TX failure to user layer
- * @pdev: Pdev TXRX handle
- * @tid: TID
- * @msdu_num: number of MSDUs with the same failure status
- * @status: failure status
- */
-void
-ol_tx_failure_indication(struct ol_txrx_pdev_t *pdev, uint8_t tid,
-			 uint32_t msdu_num, uint32_t status);
-#else
-/**
- * ol_tx_failure_cb_set() - add TX failure callback
- * @pdev: PDEV TXRX handle
- * @tx_failure_cb: TX failure callback
- */
-static inline void
-ol_tx_failure_cb_set(ol_txrx_pdev_handle pdev,
-		     void (*tx_failure_cb)(void *ctx,
-					   unsigned int num_msdu,
-					   unsigned char tid,
-					   unsigned int status))
-{
-}
-
-/**
- * ol_tx_failure_indication() - indicate TX failure to user layer
- * @pdev: Pdev TXRX handle
- * @tid: TID
- * @msdu_num: number of MSDUs with the same failure status
- * @status: failure status
- */
-static inline void
-ol_tx_failure_indication(struct ol_txrx_pdev_t *pdev, uint8_t tid,
-			 uint32_t msdu_num, uint32_t status)
-{
-}
-#endif
-
-/**
- * @brief Process an rx indication message sent by the target.
- * @details
- *  The target send a rx indication message containing thw HW descriptor
- *  info and a list of Mac header. HTT layer parse this message, get
- *  each Mac header, radiotap header info to fill in monitor nbuf,
- *  then deliver these nbuf to upper layer.
- *
- * @param pdev - the data physical device that received the frames
- *      (registered with HTT as a context pointer during attach time)
- * @param rx_ind_msg - the network buffer holding the rx indication message
- */
-void
-ol_rx_mon_mac_header_handler(ol_txrx_pdev_handle pdev, adf_nbuf_t rx_ind_msg);
 #endif /* _OL_TXRX_HTT_API__H_ */

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2014, 2016 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -58,12 +58,6 @@
 // macro to return the floor of an integer division operation
 #define VOS_FLOOR_DIV( _a, _b ) ( ( (_a) - ( (_a) % (_b) ) ) / (_b) )
 
-static inline unsigned int vos_round_div(unsigned int dividend,
-					 unsigned int divisor)
-{
-	return (dividend + (divisor / 2)) / divisor;
-}
-
 #define VOS_SWAP_U16(_x) \
    ( ( ( (_x) << 8 ) & 0xFF00 ) | ( ( (_x) >> 8 ) & 0x00FF ) )
 
@@ -98,7 +92,7 @@ static inline unsigned int vos_round_div(unsigned int dividend,
 
 #endif
 
-typedef unsigned long vos_time_t;
+
 /*--------------------------------------------------------------------------
   Type declarations
   ------------------------------------------------------------------------*/
@@ -153,33 +147,14 @@ typedef enum
     VOS_IBSS_MODE,
     VOS_P2P_DEVICE_MODE,
     VOS_OCB_MODE,
-    VOS_NDI_MODE,
     VOS_MAX_NO_OF_MODE
 } tVOS_CON_MODE;
 
 #ifdef WLAN_OPEN_P2P_INTERFACE
 #define VOS_MAX_CONCURRENCY_PERSONA    4  // This should match with WLAN_MAX_INTERFACES
 #else
-/*
- * This should match with WLAN_MAX_INTERFACES
- */
-#ifdef WLAN_4SAP_CONCURRENCY
-#define VOS_MAX_CONCURRENCY_PERSONA    4
-#else
 #define VOS_MAX_CONCURRENCY_PERSONA    3
 #endif
-#endif
-
-/*
- * MAX concurrency channel count in MCC
- */
-#define MAX_CONCURRENCY_CHAN_COUNT 2
-
-/*
- * MAX Session count per channel in MCC
- */
-#define MAX_SESSSION_PER_CHAN_MCC 2
-
 
 //This is a bit pattern to be set for each mode
 //bit 0 - sta mode

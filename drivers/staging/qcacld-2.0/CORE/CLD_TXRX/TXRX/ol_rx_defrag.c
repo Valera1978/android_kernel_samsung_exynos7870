@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2014, 2016-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -128,11 +128,14 @@ static inline void OL_RX_FRAG_PULL_HDR(htt_pdev_handle htt_pdev,
     rx_desc_len = htt_rx_msdu_rx_desc_size_hl(htt_pdev, rx_desc);
     adf_nbuf_pull_head(frag, rx_desc_len + hdrsize);
 }
+#define OL_RX_FRAG_CLONE(frag) \
+    adf_nbuf_clone(frag)
 #else
 #define OL_RX_FRAG_GET_MAC_HDR(pdev, frag) \
     (struct ieee80211_frame *) adf_nbuf_data(frag)
 #define OL_RX_FRAG_PULL_HDR(pdev, frag, hdrsize) \
     adf_nbuf_pull_head(frag, hdrsize);
+#define OL_RX_FRAG_CLONE(frag) NULL/* no-op */
 #endif /* CONFIG_HL_SUPPORT */
 
 static inline void
@@ -192,19 +195,11 @@ ol_rx_frag_indication_handler(
     u_int8_t tid)
 {
     u_int16_t seq_num;
-    u_int16_t seq_num_start, seq_num_end;
+    int seq_num_start, seq_num_end;
     struct ol_txrx_peer_t *peer;
     htt_pdev_handle htt_pdev;
     adf_nbuf_t head_msdu, tail_msdu;
     void *rx_mpdu_desc;
-
-    if (tid >= OL_TXRX_NUM_EXT_TIDS) {
-        TXRX_PRINT(TXRX_PRINT_LEVEL_ERR,
-                    "%s:  invalid tid, %u\n",
-                    __FUNCTION__,
-                    tid);
-        return;
-    }
 
     htt_pdev = pdev->htt_pdev;
     peer = ol_txrx_peer_find_by_id(pdev, peer_id);
@@ -253,7 +248,7 @@ ol_rx_reorder_flush_frag(
     htt_pdev_handle htt_pdev,
     struct ol_txrx_peer_t *peer,
     unsigned tid,
-    u_int16_t seq_num)
+    int seq_num)
 {
     struct ol_rx_reorder_array_elem_t *rx_reorder_array_elem;
     int seq;
@@ -296,8 +291,8 @@ ol_rx_reorder_store_frag(
     more_frag = mac_hdr->i_fc[1] & IEEE80211_FC1_MORE_FRAG;
 
     if ((!more_frag) && (!fragno) && (!rx_reorder_array_elem->head)) {
-        ol_rx_fraglist_insert(htt_pdev, &rx_reorder_array_elem->head,
-            &rx_reorder_array_elem->tail, frag, &all_frag_present);
+        rx_reorder_array_elem->head = frag;
+        rx_reorder_array_elem->tail = frag;
         adf_nbuf_set_next(frag, NULL);
         ol_rx_defrag(pdev, peer, tid, rx_reorder_array_elem->head);
         rx_reorder_array_elem->head = NULL;
@@ -358,8 +353,11 @@ ol_rx_fraglist_insert(
     struct ieee80211_frame *mac_hdr, *cmac_hdr, *next_hdr, *lmac_hdr;
     u_int8_t fragno, cur_fragno, lfragno, next_fragno;
     u_int8_t last_morefrag = 1, count = 0;
+    adf_nbuf_t frag_clone;
 
     adf_os_assert(frag);
+    frag_clone = OL_RX_FRAG_CLONE(frag);
+    frag = frag_clone ? frag_clone : frag;
 
     mac_hdr = (struct ieee80211_frame *) OL_RX_FRAG_GET_MAC_HDR(htt_pdev, frag);
     fragno = adf_os_le16_to_cpu(*(u_int16_t *) mac_hdr->i_seq) &
@@ -490,12 +488,6 @@ ol_rx_defrag_waitlist_flush(
         }
 
         tid = rx_reorder->tid;
-        if (tid >= OL_TXRX_NUM_EXT_TIDS) {
-            TXRX_PRINT(TXRX_PRINT_LEVEL_ERR,
-                    "%s:  invalid tid, %u\n", __func__, tid);
-            WARN_ON(1);
-            continue;
-        }
         /* get index 0 of the rx_reorder array */
         rx_reorder_base = rx_reorder - tid;
         peer = container_of(rx_reorder_base, struct ol_txrx_peer_t, tids_rx_reorder[0]);
@@ -1061,7 +1053,6 @@ ol_rx_defrag_decap_recombine(
     adf_nbuf_set_next(rx_nbuf, NULL);
     while (msdu) {
         htt_rx_msdu_desc_free(htt_pdev, msdu);
-        adf_net_buf_debug_release_skb(msdu);
         tmp = adf_nbuf_next(msdu);
         adf_nbuf_set_next(msdu, NULL);
         OL_RX_FRAG_PULL_HDR(htt_pdev, msdu, hdrsize);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2014, 2016-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -39,7 +39,8 @@
  */
 #include "palTypes.h"
 #include "aniGlobal.h"
-#include "wni_cfg.h"
+#include "wniCfgSta.h"
+
 #include "sirMacProtDef.h"
 #include "sirMacPropExts.h"
 #include "sirCommon.h"
@@ -56,7 +57,6 @@
 #include "schSysParams.h"
 #include "limTrace.h"
 #include "limTypes.h"
-#include "limUtils.h"
 
 #include "wlan_qct_wda.h"
 
@@ -346,8 +346,7 @@ tSirRetStatus schSendBeaconReq( tpAniSirGlobal pMac, tANI_U8 *beaconPayload, tAN
         FL("Successfully posted WDA_SEND_BEACON_REQ to HAL"));
 
     if (LIM_IS_AP_ROLE(psessionEntry) &&
-        pMac->sch.schObject.fBeaconChanged &&
-        vos_is_probe_rsp_offload_enabled()) {
+        pMac->sch.schObject.fBeaconChanged) {
         if(eSIR_SUCCESS != (retCode = limSendProbeRspTemplateToHal(pMac,psessionEntry,
                                     &psessionEntry->DefProbeRspIeBitmap[0])))
         {
@@ -412,19 +411,33 @@ tANI_U32 limSendProbeRspTemplateToHal(tpAniSirGlobal pMac,tpPESession psessionEn
     tANI_U8 *pFrame2Hal = psessionEntry->pSchProbeRspTemplate;
     tpSendProbeRespParams pprobeRespParams=NULL;
     tANI_U32  retCode = eSIR_FAILURE;
-    tANI_U32             nPayload, nBytes = 0, nStatus;
+    tANI_U32             nPayload,nBytes,nStatus;
     tpSirMacMgmtHdr      pMacHdr;
     tANI_U32             addnIEPresent = VOS_FALSE;
+    tANI_U32             addnIELen=0;
     tSirRetStatus        nSirStatus;
     tANI_U8              *addIE = NULL;
     tANI_U8              *addIeWoP2pIe = NULL;
     tANI_U32             addnIELenWoP2pIe = 0;
     tANI_U32             retStatus;
-    tDot11fIEExtCap extracted_extcap;
-    bool extcap_present = false;
-    tDot11fProbeResponse *prb_rsp_frm;
-    tSirRetStatus status;
-    uint16_t addn_ielen = 0;
+
+    nStatus = dot11fGetPackedProbeResponseSize( pMac, &psessionEntry->probeRespFrame, &nPayload );
+    if ( DOT11F_FAILED( nStatus ) )
+    {
+        schLog( pMac, LOGE, FL("Failed to calculate the packed size f"
+                               "or a Probe Response (0x%08x)."),
+                nStatus );
+        // We'll fall back on the worst case scenario:
+        nPayload = sizeof( tDot11fProbeResponse );
+    }
+    else if ( DOT11F_WARNED( nStatus ) )
+    {
+        schLog( pMac, LOGE, FL("There were warnings while calculating"
+                               "the packed size for a Probe Response "
+                               "(0x%08x)."), nStatus );
+    }
+
+    nBytes = nPayload + sizeof( tSirMacMgmtHdr );
 
     //Check if probe response IE is present or not
     addnIEPresent = (psessionEntry->addIeParams.probeRespDataLen != 0);
@@ -466,56 +479,23 @@ tANI_U32 limSendProbeRspTemplateToHal(tpAniSirGlobal pMac,tpPESession psessionEn
              vos_mem_free(addIeWoP2pIe);
              return retCode;
         }
-        addn_ielen = addnIELenWoP2pIe;
+        addnIELen = addnIELenWoP2pIe;
 
-        if (addn_ielen <= WNI_CFG_PROBE_RSP_ADDNIE_DATA1_LEN && addn_ielen &&
-                                 (nBytes + addn_ielen) <= SIR_MAX_PACKET_SIZE)
+        if (addnIELen <= WNI_CFG_PROBE_RSP_ADDNIE_DATA1_LEN && addnIELen &&
+                                 (nBytes + addnIELen) <= SIR_MAX_PACKET_SIZE)
         {
             vos_mem_copy(addIE, addIeWoP2pIe, addnIELenWoP2pIe);
         }
         vos_mem_free(addIeWoP2pIe);
-
-        vos_mem_set((uint8_t *)&extracted_extcap, sizeof(tDot11fIEExtCap), 0);
-        status = lim_strip_extcap_update_struct(pMac, addIE, &addn_ielen,
-                                                   &extracted_extcap);
-        if (eSIR_SUCCESS != status) {
-            limLog(pMac, LOG1, FL("extcap not extracted"));
-        } else {
-            extcap_present = true;
-        }
-
     }
 
     if (addnIEPresent)
     {
-        if ((nBytes + addn_ielen) <= SIR_MAX_PACKET_SIZE )
-            nBytes += addn_ielen;
+        if ((nBytes + addnIELen) <= SIR_MAX_PACKET_SIZE )
+            nBytes += addnIELen;
         else
             addnIEPresent = false; //Dont include the IE.
     }
-
-    /* merge extcap IE */
-    prb_rsp_frm = &psessionEntry->probeRespFrame;
-    if (extcap_present)
-        lim_merge_extcap_struct(&prb_rsp_frm->ExtCap, &extracted_extcap, true);
-
-    nStatus = dot11fGetPackedProbeResponseSize(pMac, &psessionEntry->probeRespFrame, &nPayload);
-    if (DOT11F_FAILED(nStatus))
-    {
-        schLog(pMac, LOGE,
-             FL("Failed to calculate the packed size for a Probe Response (0x%08x)."),
-             nStatus);
-        /* We'll fall back on the worst case scenario: */
-        nPayload = sizeof(tDot11fProbeResponse);
-    }
-    else if (DOT11F_WARNED(nStatus))
-    {
-        schLog(pMac, LOGE,
-             FL("There were warnings while calculating the packed size for a Probe Response (0x%08x)."),
-             nStatus);
-    }
-
-    nBytes += nPayload + sizeof(tSirMacMgmtHdr);
 
     // Paranoia:
     vos_mem_set(pFrame2Hal, nBytes, 0);
@@ -557,7 +537,10 @@ tANI_U32 limSendProbeRspTemplateToHal(tpAniSirGlobal pMac,tpPESession psessionEn
     }
 
     if (addnIEPresent)
-        vos_mem_copy(&pFrame2Hal[nBytes - addn_ielen], &addIE[0], addn_ielen);
+    {
+        vos_mem_copy ( &pFrame2Hal[nBytes - addnIELen],
+                             &addIE[0], addnIELen);
+    }
 
     /* free the allocated Memory */
     vos_mem_free(addIE);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2014, 2016-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -134,11 +134,6 @@ tpDphHashNode dphLookupHashEntry(tpAniSirGlobal pMac, tANI_U8 staAddr[], tANI_U1
     tpDphHashNode ptr = NULL;
     tANI_U16 index = hashFunction(pMac, staAddr, pDphHashTable->size);
 
-    if (!pDphHashTable->pHashTable) {
-        limLog(pMac, LOGE, FL(" pHashTable is NULL "));
-        return ptr;
-    }
-
     for (ptr = pDphHashTable->pHashTable[index]; ptr; ptr = ptr->next)
         {
             if (dphCompareMacAddr(staAddr, ptr->staAddr))
@@ -248,7 +243,7 @@ tpDphHashNode dphInitStaState(tpAniSirGlobal pMac, tSirMacAddr staAddr,
 {
     tANI_U32 val;
 
-    tpDphHashNode pStaDs, pnext;
+    tpDphHashNode pStaDs;
     tANI_U16 staIdx = HAL_STA_INVALID_IDX;
 
     if (assocId >= pDphHashTable->size)
@@ -259,25 +254,23 @@ tpDphHashNode dphInitStaState(tpAniSirGlobal pMac, tSirMacAddr staAddr,
 
     pStaDs = getNode(pMac, (tANI_U8) assocId, pDphHashTable);
     staIdx = pStaDs->staIndex;
-    pnext = pStaDs->next;
 
-    PELOG1(limLog(pMac, LOG1, FL("Assoc Id %d, Addr %pK"), assocId, &pStaDs);)
+    PELOG1(limLog(pMac, LOG1, FL("Assoc Id %d, Addr %08X"), assocId, pStaDs);)
 
-    /* Clear the STA node except for the next pointer */
-    vos_mem_set((tANI_U8 *)pStaDs, sizeof(tDphHashNode), 0);
-    pStaDs->next = pnext;
+    // Clear the STA node except for the next pointer (last 4 bytes)
+    vos_mem_set( (tANI_U8 *) pStaDs, sizeof(tDphHashNode) - sizeof(tpDphHashNode), 0);
 
-    /* Initialize the assocId */
+    // Initialize the assocId
     pStaDs->assocId = assocId;
     if(true == validStaIdx)
       pStaDs->staIndex = staIdx;
     else
       pStaDs->staIndex = HAL_STA_INVALID_IDX;
 
-    /* Initialize STA mac address */
+    // Initialize STA mac address
     vos_mem_copy( pStaDs->staAddr, staAddr, sizeof(tSirMacAddr));
 
-    /* Initialize fragmentation threshold */
+    // Initialize fragmentation threshold
     if (wlan_cfgGetInt(pMac, WNI_CFG_FRAGMENTATION_THRESHOLD, &val) != eSIR_SUCCESS)
         limLog(pMac, LOGP, FL("could not retrieve fragmentation threshold"));
     else
@@ -290,7 +283,6 @@ tpDphHashNode dphInitStaState(tpAniSirGlobal pMac, tSirMacAddr staAddr,
 #ifdef WLAN_FEATURE_11W
     pStaDs->last_assoc_received_time = 0;
 #endif
-    pStaDs->sta_deletion_in_progress = false;
     pStaDs->valid = 1;
     return pStaDs;
 }
@@ -439,7 +431,6 @@ tSirRetStatus dphDeleteHashEntry(tpAniSirGlobal pMac, tSirMacAddr staAddr, tANI_
 #ifdef WLAN_FEATURE_11W
       ptr->last_assoc_received_time = 0;
 #endif
-      ptr->sta_deletion_in_progress = false;
       ptr->next = 0;
     }
   else
@@ -473,8 +464,7 @@ tSirRetStatus dphDeleteHashEntry(tpAniSirGlobal pMac, tSirMacAddr staAddr, tANI_
 void
 dphPrintMacAddr(tpAniSirGlobal pMac, tANI_U8 addr[], tANI_U32 level)
 {
-    limLog(pMac, (tANI_U16) level,
-            FL("MAC ADDR = %02x:%02x:%02x:%02x:%02x:%02x"),
+    limLog(pMac, (tANI_U16) level, FL("MAC ADDR = %d:%d:%d:%d:%d:%d"),
            addr[0], addr[1], addr[2], addr[3], addr[4], addr[5]);
 }
 // ---------------------------------------------------------------------

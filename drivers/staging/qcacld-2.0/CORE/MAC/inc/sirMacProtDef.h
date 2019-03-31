@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -41,10 +41,8 @@
 
 #include "palTypes.h"
 #include "sirTypes.h"
-#include "wni_cfg.h"
-#ifdef WLAN_FEATURE_FILS_SK
-#include <lim_fils_defs.h>
-#endif
+#include "wniCfgSta.h"
+
 
 ///Capability information related
 #define CAPABILITY_INFO_DELAYED_BA_BIT 14
@@ -148,12 +146,8 @@
 #define SIR_MAC_ACTION_MHF            14
 #define SIR_MAC_SELF_PROTECTED        15
 #define SIR_MAC_ACTION_WME            17
-#define SIR_MAC_ACTION_FST            18
 #define SIR_MAC_ACTION_VHT            21
-#define SIR_MAC_ACTION_MAX            256
 
-#define SIR_MAC_ACTION_TX             1
-#define SIR_MAC_ACTION_RX             2
 // QoS management action codes
 
 #define SIR_MAC_QOS_ADD_TS_REQ      0
@@ -166,11 +160,6 @@
 #define SIR_MAC_QOS_DEF_BA_RSP      5
 #define SIR_MAC_QOS_DEL_BA_REQ      6
 #define SIR_MAC_QOS_DEL_BA_RSP      7
-
-#define SIR_MAC_ACTION_MEASURE_REQUEST_ID      0
-#define SIR_MAC_ACTION_MEASURE_REPORT_ID       1
-#define SIR_MAC_ACTION_TPC_REQUEST_ID          2
-#define SIR_MAC_ACTION_TPC_REPORT_ID           3
 
 #define SIR_MAC_ACTION_CHANNEL_SWITCH_ID       4
 
@@ -415,9 +404,11 @@
 #define NSS_1x1_MODE 1
 #define NSS_2x2_MODE 2
 
+#ifdef FEATURE_AP_MCC_CH_AVOIDANCE
 #define SIR_MAC_QCOM_VENDOR_EID      200
 #define SIR_MAC_QCOM_VENDOR_OUI      "\x00\xA0\xC6"
 #define SIR_MAC_QCOM_VENDOR_SIZE     3
+#endif /* FEATURE_AP_MCC_CH_AVOIDANCE */
 
 /// Workaround IE to change beacon length when it is 4*n+1
 #define SIR_MAC_ANI_WORKAROUND_EID     255
@@ -462,10 +453,6 @@
 
 #define SIR_MAC_CISCO_OUI "\x00\x40\x96"
 #define SIR_MAC_CISCO_OUI_SIZE 3
-
-/* WFA vendor specific TPC OUI */
-#define SIR_MAC_WFA_TPC_OUI           "\x00\x50\xF2\x08\x00"
-#define SIR_MAC_WFA_TPC_OUI_SIZE      5
 
 // min size of wme oui header: oui(3) + type + subtype + version
 #define SIR_MAC_OUI_WME_HDR_MIN       6
@@ -515,8 +502,6 @@
 #define SIR_MAC_NUM_TARGET_IPV6_NS_OFFLOAD_NA   16
 #define SIR_MAC_IPV6_ADDR_LEN               16
 #define SIR_IPV6_ADDR_VALID                 1
-#define SIR_IPV6_ADDR_UC_TYPE               0
-#define SIR_IPV6_ADDR_AC_TYPE               1
 #endif //WLAN_NS_OFFLOAD
 #define SIR_MAC_ARP_OFFLOAD_SIZE        1
 
@@ -594,18 +579,12 @@
 #define SIR_MAC_MAX_NUMBER_OF_RATES          12
 #define SIR_MAC_MAX_NUM_OF_DEFAULT_KEYS      4
 #define SIR_MAC_KEY_LENGTH                   13   // WEP Maximum key length size
-#define SIR_MAC_AUTH_CHALLENGE_LENGTH        253
-#define SIR_MAC_SAP_AUTH_CHALLENGE_LENGTH    128
+#define SIR_MAC_AUTH_CHALLENGE_LENGTH        128
 #define SIR_MAC_WEP_IV_LENGTH                4
 #define SIR_MAC_WEP_ICV_LENGTH               4
-#define SIR_MAC_CHALLENGE_ID_LEN             2
-
-/* 2 bytes each for auth algo number, transaction number and status code */
-#define SIR_MAC_AUTH_FRAME_INFO_LEN          6
 
 /// MAX key length when ULA is used
 #define SIR_MAC_MAX_KEY_LENGTH               32
-#define SIR_MAC_MAX_KEY_RSC_LEN              16
 
 /// Macro definitions for get/set on FC fields
 #define SIR_MAC_GET_PROT_VERSION(x)      ((((tANI_U16) x) & 0x0300) >> 8)
@@ -657,6 +636,10 @@
 
 #define IS_WES_MODE_ENABLED(x) \
                     ((x)->roam.configParam.isWESModeEnabled)
+
+#define BA_RECIPIENT       1
+#define BA_INITIATOR       2
+#define BA_BOTH_DIRECTIONS 3
 
 /// Status Code (present in Management response frames) enum
 
@@ -817,6 +800,34 @@ typedef enum eSirMacReasonCodes
     eSIR_BEACON_MISSED                               = 65534, //We invented this to tell beacon missed case
 } tSirMacReasonCodes;
 
+
+// BA Initiator v/s Recipient
+typedef enum eBADirection
+{
+  eBA_RECIPIENT,
+  eBA_INITIATOR
+} tBADirection;
+
+// A-MPDU/BA Enable/Disable in Tx/Rx direction
+typedef enum eBAEnable
+{
+  eBA_DISABLE,
+  eBA_ENABLE
+} tBAEnable;
+
+// A-MPDU/BA Policy
+typedef enum eBAPolicy
+{
+  eBA_UNCOMPRESSED,
+  eBA_COMPRESSED
+} tBAPolicy;
+
+// A-MPDU/BA Policy
+typedef enum eBAPolicyType
+{
+  eBA_POLICY_DELAYED,
+  eBA_POLICY_IMMEDIATE
+} tBAPolicyType;
 
 /// Frame control field format (2 bytes)
 typedef  __ani_attr_pre_packed struct sSirMacFrameCtl
@@ -1020,14 +1031,6 @@ typedef __ani_attr_pre_packed struct sSirMacRateSet
     tANI_U8  rate[SIR_MAC_RATESET_EID_MAX];
 } __ani_attr_packed tSirMacRateSet;
 
-/** struct merged_mac_rate_set - merged mac rate set
- * @num_rates: num of rates
- * @rate: rate list
- */
-struct merged_mac_rate_set {
-	uint8_t num_rates;
-	uint8_t rate[2 * SIR_MAC_RATESET_EID_MAX];
-};
 
 typedef __ani_attr_pre_packed struct sSirMacSSid
 {
@@ -2062,14 +2065,6 @@ typedef __ani_attr_pre_packed struct sSirMacAuthFrameBody
     tANI_U8      type;   // = SIR_MAC_CHALLENGE_TEXT_EID
     tANI_U8      length; // = SIR_MAC_AUTH_CHALLENGE_LENGTH
     tANI_U8      challengeText[SIR_MAC_AUTH_CHALLENGE_LENGTH];
-#ifdef WLAN_FEATURE_FILS_SK
-    tSirMacRsnInfo rsn_ie;
-    uint8_t assoc_delay_info;
-    uint8_t session[SIR_FILS_SESSION_LENGTH];
-    uint8_t wrapped_data_len;
-    uint8_t wrapped_data[SIR_FILS_WRAPPED_DATA_MAX_SIZE];
-    uint8_t nonce[SIR_FILS_NONCE_LENGTH];
-#endif
 } __ani_attr_packed tSirMacAuthFrameBody, *tpSirMacAuthFrameBody;
 
 typedef __ani_attr_pre_packed struct sSirMacAuthenticationFrame

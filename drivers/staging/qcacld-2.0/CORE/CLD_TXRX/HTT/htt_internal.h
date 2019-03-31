@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2016, 2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011, 2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -51,30 +51,12 @@
 #include <rx_desc.h>
 #include <wal_rx_desc.h> /* struct rx_attention, etc */
 
-/*
- * Define the HW descriptor information used by host,
- * which is copied by FW into HTT msg.
- */
-struct htt_hw_rx_desc_base {
-    struct rx_attention  attention;
-    struct rx_frag_info  frag_info;
-    struct rx_mpdu_start mpdu_start;
-    struct rx_msdu_start msdu_start;
-    struct rx_msdu_end   msdu_end;
-    struct rx_mpdu_end   mpdu_end;
-    struct rx_ppdu_start ppdu_start;
-    struct rx_ppdu_end   ppdu_end;
-};
-
 struct htt_host_fw_desc_base {
     union {
         struct fw_rx_desc_base val;
         A_UINT32 dummy_pad; /* make sure it is DOWRD aligned */
     } u;
 };
-
-/* mark the first packet after wow wakeup */
-#define HTT_MARK_FIRST_WAKEUP_PACKET   0x80000000
 
 /*
  * This struct defines the basic descriptor information used by host,
@@ -269,12 +251,14 @@ htt_print_rx_desc(struct htt_host_rx_desc_base *rx_desc)
 #define HTT_MAX_SEND_QUEUE_DEPTH 64
 
 
+#define IS_PWR2(value) (((value) ^ ((value)-1)) == ((value) << 1) - 1)
+
+
 /* FIX THIS
  * Should be: sizeof(struct htt_host_rx_desc) + max rx MSDU size,
  * rounded up to a cache line size.
  */
 #define HTT_RX_BUF_SIZE 1920
-#define MAX_RX_PAYLOAD_SZ (HTT_RX_BUF_SIZE - RX_STD_DESC_SIZE)
 /*
  * DMA_MAP expects the buffer to be an integral number of cache lines.
  * Rather than checking the actual cache line size, this code makes a
@@ -375,16 +359,6 @@ htt_rx_detach(struct htt_pdev_t *pdev);
 
 int
 htt_htc_attach(struct htt_pdev_t *pdev);
-
-/**
- * htt_htc_detach() - Detach htc service from htt
- * @pdev: htt pdev handle
- *
- *
- * Return: None
- */
-void
-htt_htc_detach(struct htt_pdev_t *pdev);
 
 void
 htt_t2h_msg_handler(void *context, HTC_PACKET *pkt);

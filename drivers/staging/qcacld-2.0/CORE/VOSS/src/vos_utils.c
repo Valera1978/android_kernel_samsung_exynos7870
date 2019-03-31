@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -62,11 +62,7 @@
 
 #include <linux/err.h>
 #include <linux/random.h>
-#if(LINUX_VERSION_CODE >= KERNEL_VERSION(4,8,0))
-#include <crypto/skcipher.h>
-#else
 #include <linux/crypto.h>
-#endif
 #include <linux/scatterlist.h>
 #include <linux/completion.h>
 #include <linux/ieee80211.h>
@@ -76,7 +72,6 @@
 #ifdef CONFIG_CNSS
 #include <linux/qcomwlan_secif.h>
 #endif
-#include <errno.h>
 
 #include "ieee80211_common.h"
 /*----------------------------------------------------------------------------
@@ -101,7 +96,7 @@
    Function Definitions and Documentation
  * -------------------------------------------------------------------------*/
 #ifndef CONFIG_CNSS
-#if defined(WLAN_FEATURE_11W) && (defined(HIF_USB) || defined(HIF_SDIO) || defined(CONFIG_NON_QC_PLATFORM_PCI))
+#if defined(WLAN_FEATURE_11W) && (defined(HIF_USB) || defined(HIF_SDIO))
 #define CMAC_TLEN 8 /* CMAC TLen = 64 bits (8 octets) */
 
 static inline void xor_128(const u8 *a, const u8 *b, u8 *out)
@@ -403,7 +398,7 @@ vos_attach_mmie(v_U8_t *igtk, v_U8_t *ipn, u_int16_t key_id,
     /*
      * Calculate MIC and then copy
      */
-#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO) || defined(CONFIG_NON_QC_PLATFORM_PCI))
+#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO))
     tfm = crypto_alloc_cipher( "aes", 0, CRYPTO_ALG_ASYNC);
 #else
     tfm = wcnss_wlan_crypto_alloc_cipher( "aes", 0, CRYPTO_ALG_ASYNC);
@@ -459,7 +454,7 @@ vos_attach_mmie(v_U8_t *igtk, v_U8_t *ipn, u_int16_t key_id,
                 (v_U8_t*)(efrm-(frmLen-sizeof(struct ieee80211_frame))),
                 nBytes - AAD_LEN - CMAC_TLEN);
 
-#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO) || defined(CONFIG_NON_QC_PLATFORM_PCI))
+#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO))
     cmac_calc_mic(tfm, input, nBytes, mic);
 #else
     wcnss_wlan_cmac_calc_mic(tfm, input, nBytes, mic);
@@ -480,7 +475,7 @@ err_tfm:
     }
 
     if (tfm)
-#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO) || defined(CONFIG_NON_QC_PLATFORM_PCI))
+#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO))
        crypto_free_cipher(tfm);
 #else
        wcnss_wlan_crypto_free_cipher(tfm);
@@ -529,7 +524,7 @@ v_BOOL_t vos_is_mmie_valid(v_U8_t *igtk, v_U8_t *ipn,
         return VOS_FALSE;
     }
 
-#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO) || defined(CONFIG_NON_QC_PLATFORM_PCI))
+#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO))
     tfm = crypto_alloc_cipher( "aes", 0, CRYPTO_ALG_ASYNC);
 #else
     tfm = wcnss_wlan_crypto_alloc_cipher( "aes", 0, CRYPTO_ALG_ASYNC);
@@ -578,7 +573,7 @@ v_BOOL_t vos_is_mmie_valid(v_U8_t *igtk, v_U8_t *ipn,
     vos_mem_copy(input, aad, AAD_LEN);
     vos_mem_copy(input+AAD_LEN, (v_U8_t*)(wh+1), nBytes - AAD_LEN - CMAC_TLEN);
 
-#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO) || defined(CONFIG_NON_QC_PLATFORM_PCI))
+#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO))
     cmac_calc_mic(tfm, input, nBytes, mic);
 #else
     wcnss_wlan_cmac_calc_mic(tfm, input, nBytes, mic);
@@ -608,7 +603,7 @@ v_BOOL_t vos_is_mmie_valid(v_U8_t *igtk, v_U8_t *ipn,
 
 err_tfm:
     if (tfm)
-#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO) || defined(CONFIG_NON_QC_PLATFORM_PCI))
+#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO))
         crypto_free_cipher(tfm);
 #else
         wcnss_wlan_crypto_free_cipher(tfm);
@@ -672,7 +667,7 @@ int hmac_sha1(v_U8_t *key, v_U8_t ksize, char *plaintext, v_U8_t psize,
 
     init_completion(&tresult.completion);
 
-#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO) || defined(CONFIG_NON_QC_PLATFORM_PCI))
+#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO))
     tfm = crypto_alloc_ahash("hmac(sha1)", CRYPTO_ALG_TYPE_AHASH,
                                         CRYPTO_ALG_TYPE_AHASH_MASK);
 #else
@@ -708,7 +703,7 @@ int hmac_sha1(v_U8_t *key, v_U8_t ksize, char *plaintext, v_U8_t psize,
 
     if (ksize) {
         crypto_ahash_clear_flags(tfm, ~0);
-#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO) || defined(CONFIG_NON_QC_PLATFORM_PCI))
+#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO))
         ret = crypto_ahash_setkey(tfm, key, ksize);
 #else
         ret = wcnss_wlan_crypto_ahash_setkey(tfm, key, ksize);
@@ -721,7 +716,7 @@ int hmac_sha1(v_U8_t *key, v_U8_t ksize, char *plaintext, v_U8_t psize,
     }
 
     ahash_request_set_crypt(req, &sg, hash_result, psize);
-#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO) || defined(CONFIG_NON_QC_PLATFORM_PCI))
+#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO))
     ret = crypto_ahash_digest(req);
 #else
     ret = wcnss_wlan_crypto_ahash_digest(req);
@@ -757,7 +752,7 @@ err_setkey:
 err_hash_buf:
     ahash_request_free(req);
 err_req:
-#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO) || defined(CONFIG_NON_QC_PLATFORM_PCI))
+#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO))
     crypto_free_ahash(tfm);
 #else
     wcnss_wlan_crypto_free_ahash(tfm);
@@ -845,7 +840,7 @@ int hmac_md5(v_U8_t *key, v_U8_t ksize, char *plaintext, v_U8_t psize,
 
     init_completion(&tresult.completion);
 
-#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO) || defined(CONFIG_NON_QC_PLATFORM_PCI))
+#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO))
     tfm = crypto_alloc_ahash("hmac(md5)", CRYPTO_ALG_TYPE_AHASH,
                                         CRYPTO_ALG_TYPE_AHASH_MASK);
 #else
@@ -881,7 +876,7 @@ int hmac_md5(v_U8_t *key, v_U8_t ksize, char *plaintext, v_U8_t psize,
 
     if (ksize) {
         crypto_ahash_clear_flags(tfm, ~0);
-#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO) || defined(CONFIG_NON_QC_PLATFORM_PCI))
+#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO))
         ret = crypto_ahash_setkey(tfm, key, ksize);
 #else
         ret = wcnss_wlan_crypto_ahash_setkey(tfm, key, ksize);
@@ -893,7 +888,7 @@ int hmac_md5(v_U8_t *key, v_U8_t ksize, char *plaintext, v_U8_t psize,
     }
 
     ahash_request_set_crypt(req, &sg, hash_result, psize);
-#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO) || defined(CONFIG_NON_QC_PLATFORM_PCI))
+#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO))
     ret = crypto_ahash_digest(req);
 #else
     ret = wcnss_wlan_crypto_ahash_digest(req);
@@ -930,7 +925,7 @@ err_setkey:
 err_hash_buf:
         ahash_request_free(req);
 err_req:
-#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO) || defined(CONFIG_NON_QC_PLATFORM_PCI))
+#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO))
         crypto_free_ahash(tfm);
 #else
         wcnss_wlan_crypto_free_ahash(tfm);
@@ -971,6 +966,231 @@ struct ecb_aes_result {
     int err;
 };
 
+static void ecb_aes_complete(struct crypto_async_request *req, int err)
+{
+    struct ecb_aes_result *r = req->data;
+    if (err == -EINPROGRESS)
+        return;
+    r->err = err;
+    complete(&r->completion);
+}
+
+
+/*--------------------------------------------------------------------------
+
+  \brief vos_encrypt_AES() - Generate AES Encrypted byte stream
+
+  The vos_encrypt_AES() function generates the encrypted byte stream for given text.
+
+  Buffer should be allocated before calling vos_rand_get_bytes().
+
+  Attempting to initialize an already initialized lock results in
+  a failure.
+
+  \param lock - pointer to the opaque lock object to initialize
+
+  \return VOS_STATUS_SUCCESS - Successfully generated random memory.
+
+          VOS_STATUS_E_FAULT  - pbBuf is an invalid pointer.
+
+          VOS_STATUS_E_FAILURE - default return value if it fails due to
+          unknown reasons
+
+       ***VOS_STATUS_E_RESOURCES - System resources (other than memory)
+          are unavailable
+  \sa
+
+    ( *** return value not considered yet )
+  --------------------------------------------------------------------------*/
+
+VOS_STATUS vos_encrypt_AES(v_U32_t cryptHandle, /* Handle */
+                           v_U8_t *pPlainText, /* pointer to data stream */
+                           v_U8_t *pCiphertext,
+                           v_U8_t *pKey) /* pointer to authentication key */
+{
+    struct ecb_aes_result result;
+    struct ablkcipher_request *req;
+    struct crypto_ablkcipher *tfm;
+    int ret = 0;
+    char iv[IV_SIZE_AES_128];
+    struct scatterlist sg_in;
+    struct scatterlist sg_out;
+
+    init_completion(&result.completion);
+
+#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO))
+    tfm =  crypto_alloc_ablkcipher( "cbc(aes)", 0, 0);
+#else
+    tfm =  wcnss_wlan_crypto_alloc_ablkcipher( "cbc(aes)", 0, 0);
+#endif
+    if (IS_ERR(tfm)) {
+        VOS_TRACE(VOS_MODULE_ID_VOSS,VOS_TRACE_LEVEL_ERROR, "crypto_alloc_ablkcipher failed");
+        ret = PTR_ERR(tfm);
+        goto err_tfm;
+    }
+
+    req = ablkcipher_request_alloc(tfm, GFP_KERNEL);
+    if (!req) {
+        VOS_TRACE( VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR, "Failed to allocate request for cbc(aes)");
+        ret = -ENOMEM;
+        goto err_req;
+    }
+
+    ablkcipher_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG,
+                                    ecb_aes_complete, &result);
+
+
+    crypto_ablkcipher_clear_flags(tfm, ~0);
+
+    ret = crypto_ablkcipher_setkey(tfm, pKey, AES_KEYSIZE_128);
+    if (ret) {
+        VOS_TRACE(VOS_MODULE_ID_VOSS,VOS_TRACE_LEVEL_ERROR, "crypto_cipher_setkey failed");
+        goto err_setkey;
+    }
+
+    memset(iv, 0, IV_SIZE_AES_128);
+
+    sg_init_one(&sg_in, pPlainText, AES_BLOCK_SIZE);
+
+    sg_init_one(&sg_out, pCiphertext, AES_BLOCK_SIZE);
+
+    ablkcipher_request_set_crypt(req, &sg_in, &sg_out, AES_BLOCK_SIZE, iv);
+
+    crypto_ablkcipher_encrypt(req);
+
+
+
+// -------------------------------------
+err_setkey:
+#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO))
+    ablkcipher_request_free(req);
+#else
+    wcnss_wlan_ablkcipher_request_free(req);
+#endif
+err_req:
+#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO))
+    crypto_free_ablkcipher(tfm);
+#else
+    wcnss_wlan_crypto_free_ablkcipher(tfm);
+#endif
+err_tfm:
+    //return ret;
+    if (ret != 0) {
+        VOS_TRACE(VOS_MODULE_ID_VOSS,VOS_TRACE_LEVEL_ERROR,"%s() call failed", __func__);
+        return VOS_STATUS_E_FAULT;
+   }
+
+    return VOS_STATUS_SUCCESS;
+}
+
+/*--------------------------------------------------------------------------
+
+  \brief vos_decrypt_AES() - Decrypts an AES Encrypted byte stream
+
+  The vos_decrypt_AES() function decrypts the encrypted byte stream.
+
+  Buffer should be allocated before calling vos_rand_get_bytes().
+
+  Attempting to initialize an already initialized lock results in
+  a failure.
+
+  \param lock - pointer to the opaque lock object to initialize
+
+  \return VOS_STATUS_SUCCESS - Successfully generated random memory.
+
+          VOS_STATUS_E_FAULT  - pbBuf is an invalid pointer.
+
+          VOS_STATUS_E_FAILURE - default return value if it fails due to
+          unknown reasons
+
+       ***VOS_STATUS_E_RESOURCES - System resources (other than memory)
+          are unavailable
+  \sa
+
+    ( *** return value not considered yet )
+  --------------------------------------------------------------------------*/
+
+VOS_STATUS vos_decrypt_AES(v_U32_t cryptHandle, /* Handle */
+                           v_U8_t *pText, /* pointer to data stream */
+                           v_U8_t *pDecrypted,
+                           v_U8_t *pKey) /* pointer to authentication key */
+{
+//    VOS_STATUS uResult = VOS_STATUS_E_FAILURE;
+    struct ecb_aes_result result;
+    struct ablkcipher_request *req;
+    struct crypto_ablkcipher *tfm;
+    int ret = 0;
+    char iv[IV_SIZE_AES_128];
+    struct scatterlist sg_in;
+    struct scatterlist sg_out;
+
+    init_completion(&result.completion);
+
+#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO))
+    tfm =  crypto_alloc_ablkcipher( "cbc(aes)", 0, 0);
+#else
+    tfm =  wcnss_wlan_crypto_alloc_ablkcipher( "cbc(aes)", 0, 0);
+#endif
+    if (IS_ERR(tfm)) {
+        VOS_TRACE(VOS_MODULE_ID_VOSS,VOS_TRACE_LEVEL_ERROR, "crypto_alloc_ablkcipher failed");
+        ret = PTR_ERR(tfm);
+        goto err_tfm;
+    }
+
+    req = ablkcipher_request_alloc(tfm, GFP_KERNEL);
+    if (!req) {
+        VOS_TRACE( VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR, "Failed to allocate request for cbc(aes)");
+        ret = -ENOMEM;
+        goto err_req;
+    }
+
+    ablkcipher_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG,
+                                    ecb_aes_complete, &result);
+
+
+    crypto_ablkcipher_clear_flags(tfm, ~0);
+
+    ret = crypto_ablkcipher_setkey(tfm, pKey, AES_KEYSIZE_128);
+    if (ret) {
+        VOS_TRACE(VOS_MODULE_ID_VOSS,VOS_TRACE_LEVEL_ERROR, "crypto_cipher_setkey failed");
+        goto err_setkey;
+       }
+
+    memset(iv, 0, IV_SIZE_AES_128);
+
+    sg_init_one(&sg_in, pText, AES_BLOCK_SIZE);
+
+    sg_init_one(&sg_out, pDecrypted, AES_BLOCK_SIZE);
+
+    ablkcipher_request_set_crypt(req, &sg_in, &sg_out, AES_BLOCK_SIZE, iv);
+
+    crypto_ablkcipher_decrypt(req);
+
+
+
+// -------------------------------------
+err_setkey:
+#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO))
+    ablkcipher_request_free(req);
+#else
+    wcnss_wlan_ablkcipher_request_free(req);
+#endif
+err_req:
+#if  !defined(CONFIG_CNSS) && (defined(HIF_USB) || defined(HIF_SDIO))
+    crypto_free_ablkcipher(tfm);
+#else
+    wcnss_wlan_crypto_free_ablkcipher(tfm);
+#endif
+err_tfm:
+    //return ret;
+    if (ret != 0) {
+        VOS_TRACE(VOS_MODULE_ID_VOSS,VOS_TRACE_LEVEL_ERROR,"%s() call failed", __func__);
+        return VOS_STATUS_E_FAULT;
+      }
+
+    return VOS_STATUS_SUCCESS;
+}
+
 v_U32_t vos_chan_to_freq(v_U8_t chan)
 {
     if (chan < VOS_24_GHZ_CHANNEL_14)       // ch 0 - ch 13
@@ -1009,88 +1229,4 @@ v_U8_t vos_chan_to_band(v_U32_t chan)
         return VOS_BAND_2GHZ;
 
     return VOS_BAND_5GHZ;
-}
-
-#ifdef FEATURE_WLAN_DIAG_SUPPORT
-/**
- * vos_tdls_tx_rx_mgmt_event()- send tdls mgmt rx tx event
- * @event_id: event id
- * @tx_rx: tx or rx
- * @type: type of frame
- * @action_sub_type: action frame type
- * @peer_mac: peer mac
- *
- * This Function sends tdls mgmt rx tx diag event
- *
- * Return: void.
- */
-void vos_tdls_tx_rx_mgmt_event(uint8_t event_id, uint8_t tx_rx,
-		uint8_t type, uint8_t action_sub_type, uint8_t *peer_mac)
-{
-	WLAN_VOS_DIAG_EVENT_DEF(tdls_tx_rx_mgmt,
-		struct vos_event_tdls_tx_rx_mgmt);
-	vos_mem_zero(&tdls_tx_rx_mgmt, sizeof(tdls_tx_rx_mgmt));
-
-	tdls_tx_rx_mgmt.event_id = event_id;
-	tdls_tx_rx_mgmt.tx_rx = tx_rx;
-	tdls_tx_rx_mgmt.type = type;
-	tdls_tx_rx_mgmt.action_sub_type = action_sub_type;
-	vos_mem_copy(tdls_tx_rx_mgmt.peer_mac,
-			peer_mac, VOS_MAC_ADDR_SIZE);
-	WLAN_VOS_DIAG_EVENT_REPORT(&tdls_tx_rx_mgmt,
-				EVENT_WLAN_TDLS_TX_RX_MGMT);
-}
-#endif
-
-/**
- * vos_rounddown_pow_of_two() - Round down to nearest power of two
- * @n: number to be tested
- *
- * Test if the input number is power of two, and return the nearest power of two
- *
- * Return: number rounded down to the nearest power of two
- */
-unsigned long vos_rounddown_pow_of_two(unsigned long n)
-{
-	if (is_power_of_2(n))
-		return n; /* already a power of 2 */
-
-	return __rounddown_pow_of_two(n);
-}
-
-/**
- * vos_status_to_os_return(): translates vos_status types to linux return types
- * @status: status to translate
- *
- * Translates error types that linux may want to handle specially.
- *
- * return: 0 or the linux error code that most closely matches the VOS_STATUS.
- *      defaults to -1 (EPERM)
- */
-int vos_status_to_os_return(VOS_STATUS status)
-{
-	switch (status) {
-	case VOS_STATUS_SUCCESS:
-		return 0;
-	case VOS_STATUS_E_FAULT:
-		return -EFAULT;
-	case VOS_STATUS_E_TIMEOUT:
-	case VOS_STATUS_E_BUSY:
-		return -EBUSY;
-	case VOS_STATUS_E_AGAIN:
-		return -EAGAIN;
-	case VOS_STATUS_E_NOSUPPORT:
-		return -ENOSYS;
-	case VOS_STATUS_E_ALREADY:
-		return -EALREADY;
-	case VOS_STATUS_E_NOMEM:
-		return -ENOMEM;
-	case VOS_STATUS_E_FAILURE:
-	case VOS_STATUS_E_INVAL:
-		return -EINVAL;
-	default:
-		VOS_TRACE(VOS_MODULE_ID_VOSS, VOS_TRACE_LEVEL_ERROR,
-			  FL("Unhandled VOS_STATUS:%d"), status);
-		return -EPERM;
-	}
 }

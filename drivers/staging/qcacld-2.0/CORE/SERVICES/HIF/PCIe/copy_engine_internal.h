@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, 2016 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -167,18 +167,6 @@ struct CE_dest_desc {
     struct dest_desc_info info;
 };
 
-/**
- * typdef CE_desc - unified data type for ce descriptors
- *
- * Both src and destination descriptors follow the same format.
- * They use different data structures for different access symantics.
- * Here we provice a unifying data type.
- */
-typedef union {
-	struct CE_src_desc src_desc;
-	struct CE_dest_desc dest_desc;
-} CE_desc;
-
 #define CE_SENDLIST_ITEMS_MAX 12
 
 enum CE_sendlist_type_e {
@@ -216,7 +204,6 @@ struct CE_sendlist_s {
 
 #define CDC_WAR_MAGIC_STR   0xceef0000
 #define CDC_WAR_DATA_CE     4
-#define CE_HW_INDEX_LINK_DOWN 0xFFFFFFFF
 
 /* Additional internal-only CE_send flags */
 #define CE_SEND_FLAG_GATHER             0x00010000         /* Use Gather */

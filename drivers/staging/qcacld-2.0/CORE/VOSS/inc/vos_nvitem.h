@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -92,59 +92,8 @@ typedef enum
 }
 eDFS_CAC_STATUS;
 
-/**
- * struct chan_to_ht_40_index_map - information of secondary channel index
- *
- * @ht_40_minus_index: HT40- channel index
- * @ht_40_plus_index: HT40+ channel index
- */
-struct chan_to_ht_40_index_map {
-   uint16 ht_40_minus_index;
-   uint16 ht_40_plus_index;
-};
-
-/**
- * enum phy_ch_width - physical layer channel width
- * @CH_WIDTH_20MHZ: channel width 20 mhz
- * @CH_WIDTH_40MHZ: channel width 40 mhz
- * @CH_WIDTH_80MHZ: channel width 80 mhz
- * @CH_WIDTH_5MHZ: channel width 5 mhz
- * @CH_WIDTH_10MHZ: channel width 10 mhz
- * @CH_WIDTH_INVALID: invalid channel width
- * @CH_WIDTH_MAX: maximum channel width
- */
-enum phy_ch_width {
-	CH_WIDTH_20MHZ = 0,
-	CH_WIDTH_40MHZ,
-	CH_WIDTH_80MHZ,
-	CH_WIDTH_5MHZ,
-	CH_WIDTH_10MHZ,
-	CH_WIDTH_INVALID,
-	CH_WIDTH_MAX
-};
-
-#define HT40PLUS_2G_FCC_CH_END       7
-#define HT40PLUS_2G_EURJAP_CH_END    9
-
-/**
- * struct ch_params_s
- * @ch_width: channel width
- * @sec_ch_offset: secondary channel offset
- * @center_freq_seg0: center freq for segment 0
- * @center_freq_seg1: center freq for segment 1
- */
-struct ch_params_s {
-	enum phy_ch_width ch_width;
-	uint8_t sec_ch_offset;
-	uint32_t center_freq_seg0;
-	uint32_t center_freq_seg1;
-};
-
 // country code type
 typedef v_U8_t v_COUNTRYCODE_t[VOS_COUNTRY_CODE_LEN];
-
-void vos_set_channel_params(uint16_t oper_ch, uint16_t sec_ch_2g,
-	struct ch_params_s *ch_params);
 
 /**------------------------------------------------------------------------
 
@@ -171,13 +120,6 @@ void vos_set_channel_params(uint16_t oper_ch, uint16_t sec_ch_2g,
   -------------------------------------------------------------------------*/
 VOS_STATUS vos_nv_getRegDomainFromCountryCode( v_REGDOMAIN_t *pRegDomain,
       const v_COUNTRYCODE_t countryCode, v_CountryInfoSource_t source);
-
-/* vos_is_fcc_regdomian() - is the regdomain FCC
- *
- * Return: true if FCC regdomain
- *         false otherwise
- */
-bool vos_is_fcc_regdomain(void);
 
 /**------------------------------------------------------------------------
 
@@ -302,7 +244,6 @@ VOS_STATUS vos_nv_setRegDomain(void * clientCtxt, v_REGDOMAIN_t regId,
   -------------------------------------------------------------------------*/
 eNVChannelEnabledType vos_nv_getChannelEnabledState(v_U32_t rfChannel);
 
-uint8_t vos_nv_skip_dsrc_dfs_2g(uint32_t rf_channel, int32_t skip_group);
 VOS_STATUS vos_nv_get_dfs_region(uint8_t *dfs_region);
 VOS_STATUS vos_nv_set_dfs_region(uint8_t dfs_region);
 
@@ -313,19 +254,4 @@ VOS_STATUS vos_init_wiphy_from_nv_bin(void);
 const char * voss_DomainIdtoString(const v_U8_t domainIdCurrent);
 VOS_STATUS vos_init_wiphy_from_eeprom(void);
 bool vos_is_dsrc_channel(uint16_t);
-uint32_t vos_nv_get_channel_flags(uint32_t rf_channel);
-int vos_update_band(uint8_t  band);
-void vos_reset_global_reg_params(void);
-bool vos_is_channel_support_sub20(uint16_t operation_channel,
-				  enum phy_ch_width channel_width,
-				  uint16_t secondary_channel);
-uint8_t vos_phy_channel_width_to_sub20(enum phy_ch_width ch_width);
-
-/**
- * vos_is_etsi_europe_country - check ETSI Europe country or not
- * @country: country string with two Characters
- *
- * Return: true if country in ETSI Europe country list
- */
-bool vos_is_etsi_europe_country(uint8_t *country);
 #endif // __VOS_NVITEM_H

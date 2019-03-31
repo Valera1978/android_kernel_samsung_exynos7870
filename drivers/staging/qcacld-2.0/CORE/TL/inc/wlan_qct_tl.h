@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2014, 2016-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -461,8 +461,83 @@ typedef tSap_SoftapStats WLANTL_TRANSFER_STA_TYPE;
 #define WLANTL_SINGLE_CLNT_THRESHOLD 4
 
 /*----------------------------------------------------------------------------
+ *   TL callback types
+ *--------------------------------------------------------------------------*/
+
+/*----------------------------------------------------------------------------
+
+  DESCRIPTION
+    Type of the tx complete callback registered with TL.
+
+    TL will call this to notify the client when a transmission for a
+    packet  has ended.
+
+  PARAMETERS
+
+    IN
+    pvosGCtx:       pointer to the global vos context; a handle to
+                    TL/HAL/PE/HDD control block can be extracted from
+                    its context
+    vosDataBuff:   pointer to the VOSS data buffer that was transmitted
+    wTxSTAtus:      status of the transmission
+
+
+  RETURN VALUE
+    The result code associated with performing the operation
+
+----------------------------------------------------------------------------*/
+typedef VOS_STATUS (*WLANTL_TxCompCBType)( v_PVOID_t      pvosGCtx,
+                                           vos_pkt_t*     pFrameDataBuff,
+                                           VOS_STATUS     wTxSTAtus );
+
+
+/*----------------------------------------------------------------------------
     INTERACTION WITH HDD
  ---------------------------------------------------------------------------*/
+/*----------------------------------------------------------------------------
+
+  DESCRIPTION
+    Type of the fetch packet callback registered with TL.
+
+    It is called by the TL when the scheduling algorithms allows for
+    transmission of another packet to the module.
+    It will be called in the context of the BAL fetch transmit packet
+    function, initiated by the bus lower layer.
+
+
+  PARAMETERS
+
+    IN
+    pvosGCtx:       pointer to the global vos context; a handle
+                    to TL's or HDD's control block can be extracted
+                    from its context
+
+    IN/OUT
+    pucSTAId:       the Id of the station for which TL is requesting a
+                    packet, in case HDD does not maintain per station
+                    queues it can give the next packet in its queue
+                    and put in the right value for the
+    pucAC:          access category requested by TL, if HDD does not have
+                    packets on this AC it can choose to service another AC
+                    queue in the order of priority
+
+    OUT
+    vosDataBuff:   pointer to the VOSS data buffer that was transmitted
+    tlMetaInfo:    meta info related to the data frame
+
+
+
+  RETURN VALUE
+    The result code associated with performing the operation
+
+----------------------------------------------------------------------------*/
+typedef VOS_STATUS (*WLANTL_STAFetchPktCBType)(
+                                            v_PVOID_t             pvosGCtx,
+                                            v_U8_t*               pucSTAId,
+                                            WLANTL_ACEnumType     ucAC,
+                                            vos_pkt_t**           vosDataBuff,
+                                            WLANTL_MetaInfoType*  tlMetaInfo);
+
 
 /*----------------------------------------------------------------------------
 
@@ -641,16 +716,6 @@ typedef struct
 /*----------------------------------------------------------------------------
  * Function Declarations and Documentation
  * -------------------------------------------------------------------------*/
-
-void *tlshim_peer_validity(void *vos_ctx, uint8_t sta_id);
-
-/**
- * tlshim_selfpeer_vdev() - get vdev of self peer
- * @vos_ctx		vos context
- *
- * Return: on success return vdev, NULL when self peer is invalid/NULL
- */
-void *tlshim_selfpeer_vdev(void *vos_ctx);
 
 /*==========================================================================
 
@@ -843,6 +908,9 @@ WLANTL_ConfigureSwFrameTXXlationForAll
    pvosGCtx:        pointer to the global vos context; a handle to TL's
                     control block can be extracted from its context
    pfnStARx:        function pointer to the receive packet handler from HDD
+   pfnSTATxComp:    function pointer to the transmit complete confirmation
+                    handler from HDD
+   pfnSTAFetchPkt:  function pointer to the packet retrieval routine in HDD
    wSTADescType:    STA Descriptor, contains information related to the
                     new added STA
 
@@ -864,6 +932,8 @@ WLANTL_RegisterSTAClient
 (
   v_PVOID_t                 pvosGCtx,
   WLANTL_STARxCBType        pfnSTARx,
+  WLANTL_TxCompCBType       pfnSTATxComp,
+  WLANTL_STAFetchPktCBType  pfnSTAFetchPkt,
   WLAN_STADescType*         wSTADescType ,
   v_S7_t                    rssi
 );
@@ -906,14 +976,6 @@ WLANTL_ClearSTAClient
   v_PVOID_t        pvosGCtx,
   v_U8_t           ucSTAId
 );
-
-/*===========================================================================
- * tl_shim_flush_cache_rx_queue() - flush cache rx queue frame
- *
- *
- * Return: None
- ============================================================================*/
-void tl_shim_flush_cache_rx_queue(void);
 
 /*===========================================================================
 
@@ -1119,8 +1181,7 @@ WLANTL_STAPktPending
 
     pvosGCtx:    pointer to the global vos context; a handle to TL's
                  control block can be extracted from its context
-    vdev:        pointer to the vdev_handle corresponding to the packet
-                 list given by upper layers
+    ucSTAId:     identifier for the STA that is pending transmission
     buf:         packet given by uppler layer for tx
 
   RETURN VALUE
@@ -1130,7 +1191,7 @@ WLANTL_STAPktPending
     up the buffer.
 
 ============================================================================*/
-adf_nbuf_t WLANTL_SendSTA_DataFrame(v_PVOID_t pvosGCtx, v_PVOID_t vdev,
+adf_nbuf_t WLANTL_SendSTA_DataFrame(v_PVOID_t pvosGCtx, v_U8_t ucSTAId,
                                     adf_nbuf_t buf
 #ifdef QCA_PKT_PROTO_TRACE
                                   , v_U8_t proto_type
@@ -1494,6 +1555,7 @@ WLANTL_TxMgmtFrm
   v_U16_t              usFrmLen,
   v_U8_t               ucFrmType,
   v_U8_t               tid,
+  WLANTL_TxCompCBType  pfnCompTxFunc,
   v_PVOID_t            voosBDHeader,
   v_U8_t               ucAckResponse
 );
@@ -2633,7 +2695,7 @@ void WLANTL_PauseUnPauseQs(void *vos_context, v_BOOL_t flag);
  * HDD will call this API to get the OL-TXRX module stats
  *
  */
-VOS_STATUS WLANTL_Get_llStats
+void WLANTL_Get_llStats
 (
   v_U8_t sessionId,
   char *buffer,
@@ -2784,15 +2846,12 @@ void WLANTL_SetAdapterMaxQDepth
    int max_q_depth
 );
 #else
-static inline VOS_STATUS WLANTL_Get_llStats
+static inline void WLANTL_Get_llStats
 (
    uint8_t sessionId,
    char *buffer,
    uint16_t length
-)
-{
-    return VOS_STATUS_SUCCESS;
-}
+) {}
 
 #endif /* QCA_LL_TX_FLOW_CT */
 
@@ -2947,38 +3006,7 @@ bool WLANTL_disable_intrabss_fwd(void *vdev);
 VOS_STATUS WLANTL_RegisterOCBPeer(void *vos_ctx, uint8_t *mac_addr,
     uint8_t *peer_id);
 
-/**
- * tl_register_vir_mon_cb() - register the HDD monitor callback to TL.
- * @vos_ctx: pointer to vos context
- * @rxcb: HDD rx callback function
- *
- * Return:VOS_STATUS_SUCCESS on success, or others failure.
- */
-VOS_STATUS
-tl_register_vir_mon_cb(void *vos_ctx, WLANTL_STARxCBType rxcb);
-
-/**
- * tl_deregister_vir_mon_cb() - deregister the HDD monitor callback to TL.
- * @vos_ctx: pointer to vos context
- *
- * Return:VOS_STATUS_SUCCESS on success, or others failure.
- */
-VOS_STATUS
-tl_deregister_vir_mon_cb(void *vos_ctx);
-
 void WLANTL_display_datapath_stats(void *vos_ctx, uint16_t bitmap);
 void WLANTL_clear_datapath_stats(void *vos_ctx, uint16_t bitmap);
 
-#ifdef QCA_SUPPORT_TXRX_LOCAL_PEER_ID
-/**
- * tl_shim_get_sta_id_by_addr() - get peer local id given the MAC address.
- * @vos_context: pointer to vos context
- * @mac_addr: pointer to mac address
- *
- * Return: local id of the peer given the MAC address.
- */
-uint16_t tl_shim_get_sta_id_by_addr(void *vos_context, uint8_t *mac_addr);
-#else
-#define tl_shim_get_sta_id_by_addr(vos_context,mac_addr) 0
-#endif
 #endif /* #ifndef WLAN_QCT_WLANTL_H */

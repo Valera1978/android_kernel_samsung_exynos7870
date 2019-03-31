@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -39,7 +39,6 @@
 #include "aniGlobal.h"
 #include "csrLinkList.h"
 #include "smsDebug.h"
-#include "sme_Trace.h"
 #include "pmcApi.h"
 #include "pmc.h"
 #include "cfgApi.h"
@@ -204,7 +203,6 @@ eHalStatus pmcStart (tHalHandle hHal)
     pMac->pmc.wowlModeRequired = FALSE;
     pMac->pmc.bmpsRequestedByHdd = FALSE;
     pMac->pmc.remainInPowerActiveTillDHCP = FALSE;
-    pMac->pmc.full_power_till_set_key = false;
     pMac->pmc.remainInPowerActiveThreshold = 0;
 
     /* WLAN Switch initial states. */
@@ -890,8 +888,7 @@ eHalStatus pmcRequestFullPower (tHalHandle hHal, void (*callbackRoutine) (void *
                                 void *callbackContext, tRequestFullPowerReason fullPowerReason)
 {
     tpAniSirGlobal pMac = PMAC_STRUCT(hHal);
-    tpRequestFullPowerEntry request_full_power_entry;
-    tListElem *pEntry;
+    tpRequestFullPowerEntry pEntry;
 
 #ifdef FEATURE_WLAN_DIAG_SUPPORT
     WLAN_VOS_DIAG_EVENT_DEF(psRequest, vos_event_wlan_powersave_payload_type);
@@ -931,41 +928,30 @@ eHalStatus pmcRequestFullPower (tHalHandle hHal, void (*callbackRoutine) (void *
         {
             pmcLog(pMac, LOGE, FL("Cannot cancel IMPS timer"));
         }
+    /* Enter Request Full Power State. */
+    if (pmcEnterRequestFullPowerState(hHal, fullPowerReason) != eHAL_STATUS_SUCCESS)
+        return eHAL_STATUS_FAILURE;
 
     /* If able to enter Request Full Power State, then request is pending.
        Allocate entry for request full power callback routine list. */
     //If caller doesn't need a callback, simply waits up the chip.
-    if (callbackRoutine) {
-        request_full_power_entry = vos_mem_malloc(sizeof(tRequestFullPowerEntry));
-        if (NULL == request_full_power_entry) {
+    if( callbackRoutine )
+    {
+        pEntry = vos_mem_malloc(sizeof(tRequestFullPowerEntry));
+        if ( NULL == pEntry )
+        {
             pmcLog(pMac, LOGE,
-                    FL("Cannot allocate memory for request full power routine list entry"));
+                   FL("Cannot allocate memory for request full power routine list entry"));
             PMC_ABORT;
             return eHAL_STATUS_FAILURE;
         }
 
         /* Store routine and context in entry. */
-        request_full_power_entry->callbackRoutine = callbackRoutine;
-        request_full_power_entry->callbackContext = callbackContext;
+        pEntry->callbackRoutine = callbackRoutine;
+        pEntry->callbackContext = callbackContext;
 
         /* Add entry to list. */
-        csrLLInsertTail(&pMac->pmc.requestFullPowerList,
-                &request_full_power_entry->link, TRUE);
-    }
-    /* Enter Request Full Power State. */
-    if (pmcEnterRequestFullPowerState(hHal, fullPowerReason) !=
-            eHAL_STATUS_SUCCESS) {
-        /*
-         * If pmcEnterRequestFullPowerState fails, driver need to
-         * remove callback from requestFullPowerList
-         */
-        if (callbackRoutine) {
-            pEntry = csrLLRemoveTail(&pMac->pmc.requestFullPowerList, TRUE);
-            request_full_power_entry = GET_BASE_ADDR(pEntry,
-                    tRequestFullPowerEntry, link);
-            vos_mem_free(request_full_power_entry);
-        }
-        return eHAL_STATUS_FAILURE;
+        csrLLInsertTail(&pMac->pmc.requestFullPowerList, &pEntry->link, TRUE);
     }
 
     return eHAL_STATUS_PMC_PENDING;
@@ -1157,7 +1143,7 @@ static void pmcProcessResponse( tpAniSirGlobal pMac, tSirSmeRsp *pMsg )
     {
         pCommand = GET_BASE_ADDR(pEntry, tSmeCmd, Link);
 
-        pmcLog(pMac, LOG2, FL("process message = 0x%x"), pMsg->messageType);
+        pmcLog(pMac, LOG2, FL("process message = %d"), pMsg->messageType);
 
     /* Process each different type of message. */
     switch (pMsg->messageType)
@@ -2468,8 +2454,6 @@ eHalStatus pmcSetHostOffload (tHalHandle hHal, tpSirHostOffloadReq pRequest,
     msg.type = WDA_SET_HOST_OFFLOAD;
     msg.reserved = 0;
     msg.bodyptr = pRequestBuf;
-    MTRACE(vos_trace(VOS_MODULE_ID_SME, TRACE_CODE_SME_TX_WDA_MSG, sessionId,
-                                                           msg.type));
     if(VOS_STATUS_SUCCESS != vos_mq_post_message(VOS_MODULE_ID_WDA, &msg))
     {
         VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_ERROR, "%s: Not able to post WDA_SET_HOST_OFFLOAD message to WDA", __func__);
@@ -2524,8 +2508,6 @@ eHalStatus pmcSetKeepAlive (tHalHandle hHal, tpSirKeepAliveReq pRequest, tANI_U8
     msg.type = WDA_SET_KEEP_ALIVE;
     msg.reserved = 0;
     msg.bodyptr = pRequestBuf;
-    MTRACE(vos_trace(VOS_MODULE_ID_SME, TRACE_CODE_SME_TX_WDA_MSG, sessionId,
-                                                            msg.type));
     if(VOS_STATUS_SUCCESS != vos_mq_post_message(VOS_MODULE_ID_WDA, &msg))
     {
         VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_ERROR, "%s: "
@@ -2578,8 +2560,6 @@ eHalStatus pmcSetNSOffload (tHalHandle hHal, tpSirHostOffloadReq pRequest,
     msg.type = WDA_SET_NS_OFFLOAD;
     msg.reserved = 0;
     msg.bodyptr = pRequestBuf;
-    MTRACE(vos_trace(VOS_MODULE_ID_SME, TRACE_CODE_SME_TX_WDA_MSG, sessionId,
-                                                             msg.type));
     if(VOS_STATUS_SUCCESS != vos_mq_post_message(VOS_MODULE_ID_WDA, &msg))
     {
         VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_ERROR, "%s: Not able to post SIR_HAL_SET_HOST_OFFLOAD message to HAL", __func__);
@@ -2867,17 +2847,14 @@ eHalStatus pmcSetPreferredNetworkList
         return eHAL_STATUS_FAILURE;
     }
 
-    pRequestBuf = vos_mem_malloc(sizeof(tSirPNOScanReq) +
-                  (pRequest->num_vendor_oui) *
-                  (sizeof(struct vendor_oui)));
+    pRequestBuf = vos_mem_malloc(sizeof(tSirPNOScanReq));
     if (NULL == pRequestBuf)
     {
         VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_ERROR, "%s: Not able to allocate memory for PNO request", __func__);
         return eHAL_STATUS_FAILED_ALLOC;
     }
 
-    vos_mem_copy(pRequestBuf, pRequest, sizeof(tSirPNOScanReq) +
-                 (pRequest->num_vendor_oui) * (sizeof(struct vendor_oui)));
+    vos_mem_copy(pRequestBuf, pRequest, sizeof(tSirPNOScanReq));
 
     /*Must translate the mode first*/
     ucDot11Mode = (tANI_U8) csrTranslateToWNICfgDot11Mode(pMac,
@@ -2999,6 +2976,8 @@ eHalStatus pmcUpdateScanParams(tHalHandle hHal, tCsrConfig *pRequest, tCsrChanne
     vos_msg_t msg;
     int i;
 
+    VOS_TRACE( VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_INFO, "%s started", __func__);
+
     pRequestBuf = vos_mem_malloc(sizeof(tSirUpdateScanParams));
     if (NULL == pRequestBuf)
     {
@@ -3017,6 +2996,9 @@ eHalStatus pmcUpdateScanParams(tHalHandle hHal, tCsrConfig *pRequest, tCsrChanne
 
     for (i=0; i < pRequestBuf->ucChannelCount; i++)
     {
+        VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_INFO,
+                  "%s: Channel List %d: %d", __FUNCTION__, i, pChannelList->channelList[i] );
+
         pRequestBuf->aChannels[i] = pChannelList->channelList[i];
     }
     pRequestBuf->usPassiveMinChTime = pRequest->nPassiveMinChnTime;
@@ -3028,8 +3010,6 @@ eHalStatus pmcUpdateScanParams(tHalHandle hHal, tCsrConfig *pRequest, tCsrChanne
     msg.type = WDA_UPDATE_SCAN_PARAMS_REQ;
     msg.reserved = 0;
     msg.bodyptr = pRequestBuf;
-    MTRACE(vos_trace(VOS_MODULE_ID_SME, TRACE_CODE_SME_TX_WDA_MSG, NO_SESSION,
-                                                              msg.type));
     if (!VOS_IS_STATUS_SUCCESS(vos_mq_post_message(VOS_MODULE_ID_WDA, &msg)))
     {
         VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_ERROR, "%s: Not able to post WDA_UPDATE_SCAN_PARAMS message to WDA", __func__);
@@ -3068,8 +3048,7 @@ eHalStatus pmcSetPowerParams(tHalHandle hHal,   tSirSetPowerParamsReq*  pwParams
     msg.type = WDA_SET_POWER_PARAMS_REQ;
     msg.reserved = 0;
     msg.bodyptr = pRequestBuf;
-    MTRACE(vos_trace(VOS_MODULE_ID_SME, TRACE_CODE_SME_TX_WDA_MSG, NO_SESSION,
-                                                           msg.type));
+
     if(VOS_STATUS_SUCCESS != vos_mq_post_message(VOS_MODULE_ID_WDA, &msg))
     {
         VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_ERROR, "%s: Not able to post WDA_SET_POWER_PARAMS_REQ message to WDA", __func__);
@@ -3132,8 +3111,7 @@ eHalStatus pmcGetFilterMatchCount
 
     pMac->pmc.FilterMatchCountCB = callbackRoutine;
     pMac->pmc.FilterMatchCountCBContext = callbackContext;
-    MTRACE(vos_trace(VOS_MODULE_ID_SME, TRACE_CODE_SME_TX_WDA_MSG, sessionId,
-                                                           msg.type));
+
     if(VOS_STATUS_SUCCESS != vos_mq_post_message(VOS_MODULE_ID_WDA, &msg))
     {
         VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_ERROR,
@@ -3148,8 +3126,6 @@ eHalStatus pmcGetFilterMatchCount
 #endif // WLAN_FEATURE_PACKET_FILTERING
 
 #ifdef WLAN_FEATURE_GTK_OFFLOAD
-
-#define GTK_OFFLOAD_DISABLE 1
 /* ---------------------------------------------------------------------------
     \fn pmcSetGTKOffload
     \brief  Set GTK offload feature.
@@ -3190,16 +3166,9 @@ eHalStatus pmcSetGTKOffload (tHalHandle hHal, tpSirGtkOffloadParams pGtkOffload,
 
     vos_mem_copy(pRequestBuf, pGtkOffload, sizeof(tSirGtkOffloadParams));
 
-#ifdef WLAN_FEATURE_FILS_SK
-    if (pSession->is_fils_connection)
-        pRequestBuf->ulFlags = GTK_OFFLOAD_DISABLE;
-#endif
-
     msg.type = WDA_GTK_OFFLOAD_REQ;
     msg.reserved = 0;
     msg.bodyptr = pRequestBuf;
-    MTRACE(vos_trace(VOS_MODULE_ID_SME, TRACE_CODE_SME_TX_WDA_MSG, sessionId,
-                                                             msg.type));
     if (!VOS_IS_STATUS_SUCCESS(vos_mq_post_message(VOS_MODULE_ID_WDA, &msg)))
     {
         VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_ERROR, "%s: Not able to post "
@@ -3264,8 +3233,7 @@ eHalStatus pmcGetGTKOffload(tHalHandle hHal, GTKOffloadGetInfoCallback callbackR
 
     pMac->pmc.GtkOffloadGetInfoCB = callbackRoutine;
     pMac->pmc.GtkOffloadGetInfoCBContext = callbackContext;
-    MTRACE(vos_trace(VOS_MODULE_ID_SME, TRACE_CODE_SME_TX_WDA_MSG, sessionId,
-                                                              msg.type));
+
     if (!VOS_IS_STATUS_SUCCESS(vos_mq_post_message(VOS_MODULE_ID_WDA, &msg)))
     {
         VOS_TRACE(VOS_MODULE_ID_SME, VOS_TRACE_LEVEL_ERROR, "%s: Not able to post WDA_GTK_OFFLOAD_GETINFO_REQ message to WDA",
@@ -3591,7 +3559,6 @@ eHalStatus PmcOffloadEnableStaModePowerSave(tHalHandle hHal,
                    FL("Successful Queued Enabling Sta Mode Ps Request"));
 
             pmc->configStaPsEnabled = TRUE;
-            pmc->configDefStaPsEnabled = TRUE;
             return eHAL_STATUS_SUCCESS;
         }
         else
@@ -3617,41 +3584,14 @@ eHalStatus PmcOffloadEnableStaModePowerSave(tHalHandle hHal,
 }
 
 eHalStatus PmcOffloadDisableStaModePowerSave(tHalHandle hHal,
-                                             FullPowerReqCb callback_routine,
-                                             void *callback_context,
                                              tANI_U32 sessionId)
 {
     tpAniSirGlobal pMac = PMAC_STRUCT(hHal);
     tpPsOffloadPerSessionInfo pmc = &pMac->pmcOffloadInfo.pmc[sessionId];
     eHalStatus status = eHAL_STATUS_SUCCESS;
-    tpPmcOffloadReqFullPowerEntry power_entry;
-    tListElem *pEntry;
 
-    if (pmc->configStaPsEnabled ||
-        vos_is_mon_enable()) {
-        if (callback_routine) {
-            /* Allocate entry for Full Power Cb list. */
-            power_entry = vos_mem_malloc(sizeof(*power_entry));
-            if (!power_entry) {
-                smsLog(pMac, LOGE,
-                       FL("Cannot allocate memory for Full Pwr routine list"));
-                return eHAL_STATUS_FAILED_ALLOC;
-            }
-            /* Store routine and context in entry. */
-            power_entry->fullPwrCb = callback_routine;
-            power_entry->callbackContext = callback_context;
-            power_entry->sessionId = sessionId;
-            /* Add entry to list. */
-            csrLLInsertTail(&pmc->fullPowerCbList, &power_entry->link, FALSE);
-        }
+    if (pmc->configStaPsEnabled) {
         status = pmcOffloadDisableStaPsHandler(pMac, sessionId);
-        if ((eHAL_STATUS_SUCCESS != status) && callback_routine) {
-            pEntry = csrLLRemoveTail(&pmc->fullPowerCbList, TRUE);
-            power_entry = GET_BASE_ADDR(pEntry,
-                    tPmcOffloadReqFullPowerEntry, link);
-            vos_mem_free(power_entry);
-            return eHAL_STATUS_FAILURE;
-        }
     } else {
         /*
          * configStaPsEnabled is the master flag
@@ -3664,9 +3604,8 @@ eHalStatus PmcOffloadDisableStaModePowerSave(tHalHandle hHal,
         /* Stop the Auto Sta Ps Timer if running */
         pmcOffloadStopAutoStaPsTimer(pMac, sessionId);
         pmc->configDefStaPsEnabled = FALSE;
-        return eHAL_STATUS_SUCCESS;
     }
-    return eHAL_STATUS_PMC_PENDING;
+    return status;
 }
 
 eHalStatus pmcOffloadRequestFullPower (tHalHandle hHal, tANI_U32 sessionId,

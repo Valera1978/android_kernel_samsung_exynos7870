@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2014, 2016-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011, 2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -49,9 +49,6 @@
 #include <ol_htt_tx_api.h>   /* HTT_TX_DESC_VADDR_OFFSET */
 #include <ol_txrx_htt_api.h> /* ol_tx_msdu_id_storage */
 #include <htt_internal.h>
-#include "adf_trace.h"
-
-#include <vos_utils.h>
 
 #ifdef IPA_UC_OFFLOAD
 /* IPA Micro controler TX data packet HTT Header Preset */
@@ -72,237 +69,194 @@
 
 /*--- setup / tear-down functions -------------------------------------------*/
 
+#ifdef QCA_SUPPORT_TXDESC_SANITY_CHECKS
+u_int32_t *g_dbg_htt_desc_end_addr, *g_dbg_htt_desc_start_addr;
+#endif
 
-/**
- * htt_tx_desc_get_size() - get tx descripotrs size
- * @pdev:  htt device instance pointer
- *
- * This function will get HTT TX descriptor size and fragment descriptor size
- *
- * Return: None
- */
-static inline void htt_tx_desc_get_size(struct htt_pdev_t *pdev)
+int
+htt_tx_attach(struct htt_pdev_t *pdev, int desc_pool_elems)
 {
-	if (pdev->cfg.is_high_latency) {
-		pdev->tx_descs.size = sizeof(struct htt_host_tx_desc_t);
-	} else {
-		pdev->tx_descs.size =
-			/*
-			 * Start with the size of the base struct
-			 * that actually gets downloaded.
-			 */
-			sizeof(struct htt_host_tx_desc_t)
-			/*
-			 * Add the fragmentation descriptor elements.
-			 * Add the most that OS may deliver, plus one more in
-			 * case the txrx code adds a prefix fragment (for TSO or
-			 * audio interworking SNAP header)
-			 */
-			+ (ol_cfg_netbuf_frags_max(
-				pdev->ctrl_pdev)+1) * 8 /* 2x uint32_t */
-			+ 4; /* u_int32_t fragmentation list terminator */
-	}
+    int i, i_int, pool_size;
+    uint32_t **p;
+    adf_os_dma_addr_t pool_paddr = {0};
+    struct htt_tx_desc_page_t *page_info;
+    unsigned int num_link = 0;
+    uint32_t page_size;
+
+    if (pdev->cfg.is_high_latency) {
+        pdev->tx_descs.size = sizeof(struct htt_host_tx_desc_t);
+    } else {
+        pdev->tx_descs.size =
+            /*
+             * Start with the size of the base struct
+             * that actually gets downloaded.
+             */
+            sizeof(struct htt_host_tx_desc_t)
+            /*
+             * Add the fragmentation descriptor elements.
+             * Add the most that the OS may deliver, plus one more in
+             * case the txrx code adds a prefix fragment (for TSO or
+             * audio interworking SNAP header)
+             */
+            + (ol_cfg_netbuf_frags_max(pdev->ctrl_pdev)+1) * 8 // 2x u_int32_t
+            + 4; /* u_int32_t fragmentation list terminator */
+    }
+
+    /*
+     * Make sure tx_descs.size is a multiple of 4-bytes.
+     * It should be, but round up just to be sure.
+     */
+    pdev->tx_descs.size = (pdev->tx_descs.size + 3) & (~0x3);
+    pdev->tx_descs.pool_elems = desc_pool_elems;
+    pdev->tx_descs.alloc_cnt = 0;
+
+    pool_size = pdev->tx_descs.pool_elems * pdev->tx_descs.size;
+
+   /* Calculate required page count first */
+    page_size = adf_os_mem_get_page_size();
+    pdev->num_pages = pool_size / page_size;
+    if (pool_size % page_size)
+        pdev->num_pages++;
+
+    /* Put in as many as possible descriptors into single page */
+    /* calculate how many descriptors can put in single page */
+    pdev->num_desc_per_page = page_size / pdev->tx_descs.size;
+
+    /* Pages information storage */
+    pdev->desc_pages = (struct htt_tx_desc_page_t *)adf_os_mem_alloc(
+        pdev->osdev, pdev->num_pages * sizeof(struct htt_tx_desc_page_t));
+    if (!pdev->desc_pages) {
+        adf_os_print("HTT Attach, desc page alloc fail");
+        goto fail1;
+    }
+
+    page_info = pdev->desc_pages;
+    p = (uint32_t **) pdev->tx_descs.freelist;
+    /* Allocate required memory with multiple pages */
+    for(i = 0; i < pdev->num_pages; i++) {
+        if (pdev->cfg.is_high_latency) {
+            page_info->page_v_addr_start = adf_os_mem_alloc(
+                pdev->osdev, page_size);
+            page_info->page_p_addr = pool_paddr;
+            if (!page_info->page_v_addr_start) {
+               page_info = pdev->desc_pages;
+               for (i_int = 0 ; i_int < i; i_int++) {
+                    page_info = pdev->desc_pages + i_int;
+                    adf_os_mem_free(page_info->page_v_addr_start);
+               }
+               goto fail2;
+            }
+        } else {
+            page_info->page_v_addr_start = adf_os_mem_alloc_consistent(
+                pdev->osdev,
+                page_size,
+                &page_info->page_p_addr,
+                adf_os_get_dma_mem_context((&pdev->tx_descs), memctx));
+            if (!page_info->page_v_addr_start) {
+               page_info = pdev->desc_pages;
+               for (i_int = 0 ; i_int < i; i_int++) {
+                    page_info = pdev->desc_pages + i_int;
+                    adf_os_mem_free_consistent(
+                        pdev->osdev,
+                        pdev->num_desc_per_page * pdev->tx_descs.size,
+                        page_info->page_v_addr_start,
+                        page_info->page_p_addr,
+                        adf_os_get_dma_mem_context((&pdev->tx_descs), memctx));
+               }
+               goto fail2;
+            }
+        }
+        page_info->page_v_addr_end = page_info->page_v_addr_start +
+            pdev->num_desc_per_page * pdev->tx_descs.size;
+        page_info++;
+    }
+
+    page_info = pdev->desc_pages;
+    pdev->tx_descs.freelist = (uint32_t *)page_info->page_v_addr_start;
+    p = (uint32_t **) pdev->tx_descs.freelist;
+    for(i = 0; i < pdev->num_pages; i++) {
+        for (i_int = 0; i_int < pdev->num_desc_per_page; i_int++) {
+            if (i_int == (pdev->num_desc_per_page - 1)) {
+                /* Last element on this page, should pint next page */
+                if (!page_info->page_v_addr_start) {
+                    adf_os_print("over flow num link %d\n", num_link);
+                    goto fail3;
+                }
+                page_info++;
+                *p = (uint32_t *)page_info->page_v_addr_start;
+            }
+            else {
+                *p = (uint32_t *)(((char *) p) + pdev->tx_descs.size);
+            }
+            num_link++;
+            p = (uint32_t **) *p;
+            /* Last link established exit */
+            if (num_link == (pdev->tx_descs.pool_elems - 1))
+               break;
+        }
+    }
+    *p = NULL;
+
+    if (pdev->cfg.is_high_latency) {
+        adf_os_atomic_init(&pdev->htt_tx_credit.target_delta);
+        adf_os_atomic_init(&pdev->htt_tx_credit.bus_delta);
+        adf_os_atomic_add(HTT_MAX_BUS_CREDIT,&pdev->htt_tx_credit.bus_delta);
+    }
+    return 0; /* success */
+
+fail3:
+    if (pdev->cfg.is_high_latency) {
+        page_info = pdev->desc_pages;
+        for (i_int = 0 ; i_int < pdev->num_pages; i_int++) {
+            page_info = pdev->desc_pages + i_int;
+            adf_os_mem_free(page_info->page_v_addr_start);
+        }
+    } else {
+        page_info = pdev->desc_pages;
+        for (i_int = 0 ; i_int < pdev->num_pages; i_int++) {
+            page_info = pdev->desc_pages + i_int;
+            adf_os_mem_free_consistent(
+                pdev->osdev,
+                pdev->num_desc_per_page * pdev->tx_descs.size,
+                page_info->page_v_addr_start,
+                page_info->page_p_addr,
+                adf_os_get_dma_mem_context((&pdev->tx_descs), memctx));
+        }
+    }
+
+fail2:
+    adf_os_mem_free(pdev->desc_pages);
+
+fail1:
+    return -1;
 }
 
-#ifdef CONFIG_HL_SUPPORT
-
-/**
- * htt_tx_attach() - Attach HTT device instance
- * @pdev: htt device instance pointer
- * @desc_pool_elems: Number of TX descriptors
- *
- * This function will allocate HTT TX resources
- *
- * Return: 0 Success
- */
-int htt_tx_attach(struct htt_pdev_t *pdev, int desc_pool_elems)
+void
+htt_tx_detach(struct htt_pdev_t *pdev)
 {
-	int i, i_int, pool_size;
-	uint32_t **p;
-	uint32_t num_link = 0;
-	uint16_t num_page, num_desc_per_page;
-	void **cacheable_pages = NULL;
+    unsigned int i;
+    struct htt_tx_desc_page_t *page_info;
 
-	htt_tx_desc_get_size(pdev);
-
-	/*
-	 * Make sure tx_descs.size is a multiple of 4-bytes.
-	 * It should be, but round up just to be sure.
-	 */
-	pdev->tx_descs.size = (pdev->tx_descs.size + 3) & (~0x3);
-
-	pdev->tx_descs.pool_elems = desc_pool_elems;
-	pdev->tx_descs.alloc_cnt = 0;
-	pool_size = pdev->tx_descs.pool_elems * pdev->tx_descs.size;
-	adf_os_mem_multi_pages_alloc(pdev->osdev, &pdev->tx_descs.desc_pages,
-				  pdev->tx_descs.size,
-				  pdev->tx_descs.pool_elems,
-				  adf_os_get_dma_mem_context((&pdev->tx_descs),
-							  memctx), true);
-	if ((0 == pdev->tx_descs.desc_pages.num_pages) ||
-	    (NULL == pdev->tx_descs.desc_pages.cacheable_pages)) {
-		adf_os_print("HTT desc alloc fail");
-		goto out_fail;
-	}
-	num_page = pdev->tx_descs.desc_pages.num_pages;
-	num_desc_per_page = pdev->tx_descs.desc_pages.num_element_per_page;
-
-	/* link tx descriptors into a freelist */
-	cacheable_pages = pdev->tx_descs.desc_pages.cacheable_pages;
-
-	pdev->tx_descs.freelist = (uint32_t *)cacheable_pages[0];
-	p = (uint32_t **)pdev->tx_descs.freelist;
-	for (i = 0; i < num_page; i++) {
-		for (i_int = 0; i_int < num_desc_per_page; i_int++) {
-			if (i_int == (num_desc_per_page - 1)) {
-				/*
-				 * Last element on this page,
-				 * should point next page
-				 */
-				if (!cacheable_pages[i + 1]) {
-					adf_os_print("over flow num link %d\n",
-						   num_link);
-					goto free_htt_desc;
-				}
-				*p = (uint32_t *)cacheable_pages[i + 1];
-			} else {
-				*p = (uint32_t *)
-					(((char *)p) + pdev->tx_descs.size);
-			}
-			num_link++;
-			p = (uint32_t **) *p;
-			/* Last link established exit */
-			if (num_link == (pdev->tx_descs.pool_elems - 1))
-				break;
-		}
-	}
-	*p = NULL;
-
-	adf_os_atomic_init(&pdev->htt_tx_credit.target_delta);
-	adf_os_atomic_init(&pdev->htt_tx_credit.bus_delta);
-	adf_os_atomic_add(HTT_MAX_BUS_CREDIT, &pdev->htt_tx_credit.bus_delta);
-
-	/* success */
-	return 0;
-
-free_htt_desc:
-	adf_os_mem_multi_pages_free(pdev->osdev, &pdev->tx_descs.desc_pages,
-				 adf_os_get_dma_mem_context((&pdev->tx_descs),
-							 memctx), true);
-out_fail:
-	return -ENOBUFS;
-}
-
-void htt_tx_detach(struct htt_pdev_t *pdev)
-{
-	if (!pdev) {
-		adf_os_print("htt tx detach invalid instance");
-		return;
-	}
-
-	adf_os_mem_multi_pages_free(pdev->osdev, &pdev->tx_descs.desc_pages,
-				 adf_os_get_dma_mem_context((&pdev->tx_descs),
-							 memctx), true);
-}
-
-/**
- * htt_tx_get_paddr() - get physical address for htt desc
- * @pdev: htt pdev
- * @target_vaddr: virtual address
- *
- * Get HTT descriptor physical address from virtaul address
- * Find page first and find offset
- * Not required for HL systems
- *
- * Return: Physical address of descriptor
- */
-adf_os_dma_addr_t htt_tx_get_paddr(htt_pdev_handle pdev,
-				char *target_vaddr)
-{
-	return 0;
-}
-
-#else
-
-int htt_tx_attach(struct htt_pdev_t *pdev, int desc_pool_elems)
-{
-	int i, i_int, pool_size;
-	uint32_t **p;
-	struct adf_os_mem_dma_page_t *page_info;
-	uint32_t num_link = 0;
-	uint16_t num_page, num_desc_per_page;
-
-	htt_tx_desc_get_size(pdev);
-
-	/*
-	 * Make sure tx_descs.size is a multiple of 4-bytes.
-	 * It should be, but round up just to be sure.
-	 */
-	pdev->tx_descs.size = (pdev->tx_descs.size + 3) & (~0x3);
-
-	pdev->tx_descs.pool_elems = desc_pool_elems;
-	pdev->tx_descs.alloc_cnt = 0;
-	pool_size = pdev->tx_descs.pool_elems * pdev->tx_descs.size;
-	adf_os_mem_multi_pages_alloc(pdev->osdev, &pdev->tx_descs.desc_pages,
-		pdev->tx_descs.size, pdev->tx_descs.pool_elems,
-		adf_os_get_dma_mem_context((&pdev->tx_descs), memctx), false);
-	if ((0 == pdev->tx_descs.desc_pages.num_pages) ||
-		  (NULL == pdev->tx_descs.desc_pages.dma_pages)) {
-		adf_os_print("%s: HTT desc alloc fail", __func__);
-		goto out_fail;
-	}
-	num_page = pdev->tx_descs.desc_pages.num_pages;
-	num_desc_per_page = pdev->tx_descs.desc_pages.num_element_per_page;
-
-	/* link tx descriptors into a freelist */
-	page_info = pdev->tx_descs.desc_pages.dma_pages;
-	pdev->tx_descs.freelist = (uint32_t *)page_info->page_v_addr_start;
-	p = (uint32_t **) pdev->tx_descs.freelist;
-	for (i = 0; i < num_page; i++) {
-		for (i_int = 0; i_int < num_desc_per_page; i_int++) {
-			if (i_int == (num_desc_per_page - 1)) {
-				/*
-				 * Last element on this page,
-				 * should pint next page */
-				if (!page_info->page_v_addr_start) {
-					adf_os_print("over flow num link %d\n",
-						num_link);
-					goto free_htt_desc;
-				}
-				page_info++;
-				*p = (uint32_t *)page_info->page_v_addr_start;
-			} else {
-				*p = (uint32_t *)
-					(((char *) p) + pdev->tx_descs.size);
-			}
-			num_link++;
-			p = (uint32_t **) *p;
-			/* Last link established exit */
-			if (num_link == (pdev->tx_descs.pool_elems - 1))
-				break;
-		}
-	}
-	*p = NULL;
-
-	/* success */
-	return 0;
-
-free_htt_desc:
-	adf_os_mem_multi_pages_free(pdev->osdev, &pdev->tx_descs.desc_pages,
-		adf_os_get_dma_mem_context((&pdev->tx_descs), memctx), false);
-out_fail:
-	return -ENOBUFS;
-}
-
-void htt_tx_detach(struct htt_pdev_t *pdev)
-{
-	if (!pdev) {
-		adf_os_print("htt tx detach invalid instance");
-		return;
-	}
-
-	adf_os_mem_multi_pages_free(pdev->osdev, &pdev->tx_descs.desc_pages,
-		adf_os_get_dma_mem_context((&pdev->tx_descs), memctx), false);
+    if (pdev){
+        if (pdev->cfg.is_high_latency) {
+            adf_os_mem_free(pdev->tx_descs.pool_vaddr);
+            for (i = 0; i < pdev->num_pages; i++) {
+                page_info = pdev->desc_pages + i;
+                    adf_os_mem_free(page_info->page_v_addr_start);
+            }
+        } else {
+            for (i = 0; i < pdev->num_pages; i++) {
+                page_info = pdev->desc_pages + i;
+                    adf_os_mem_free_consistent(
+                    pdev->osdev,
+                    pdev->num_desc_per_page * pdev->tx_descs.size,
+                    page_info->page_v_addr_start,
+                    page_info->page_p_addr,
+                    adf_os_get_dma_mem_context((&pdev->tx_descs), memctx));
+            }
+        }
+        adf_os_mem_free(pdev->desc_pages);
+    }
 }
 
 /**
@@ -313,17 +267,14 @@ void htt_tx_detach(struct htt_pdev_t *pdev)
  *
  * Return: Physical address of descriptor
  */
-adf_os_dma_addr_t htt_tx_get_paddr(htt_pdev_handle pdev,
-				char *target_vaddr)
+adf_os_dma_addr_t htt_tx_get_paddr(htt_pdev_handle pdev, char *target_vaddr)
 {
-	uint16_t i;
-	struct adf_os_mem_dma_page_t *page_info = NULL;
-	uint64_t offset;
+	unsigned int i;
+	struct htt_tx_desc_page_t *page_info = NULL;
 
-	for (i = 0; i < pdev->tx_descs.desc_pages.num_pages; i++) {
-		page_info = pdev->tx_descs.desc_pages.dma_pages + i;
-		if (!page_info || !page_info->page_v_addr_start) {
-			adf_os_print("invalid page_info");
+	for (i = 0; i < pdev->num_pages; i++) {
+		page_info = pdev->desc_pages + i;
+		if (!page_info->page_v_addr_start) {
 			adf_os_assert(0);
 			return 0;
 		}
@@ -332,17 +283,9 @@ adf_os_dma_addr_t htt_tx_get_paddr(htt_pdev_handle pdev,
 			break;
 	}
 
-	if (!page_info) {
-		adf_os_print("invalid page_info");
-		adf_os_assert(0);
-		return 0;
-	}
-
-	offset = (uint64_t)(target_vaddr - page_info->page_v_addr_start);
-	return page_info->page_p_addr + offset;
+	return page_info->page_p_addr +
+		(adf_os_dma_addr_t)(target_vaddr - page_info->page_v_addr_start);
 }
-
-#endif
 
 /*--- descriptor allocation functions ---------------------------------------*/
 
@@ -520,11 +463,6 @@ htt_tx_send_std(
          */
         download_len = packet_len;
     }
-
-    NBUF_UPDATE_TX_PKT_COUNT(msdu, NBUF_TX_PKT_HTT);
-    DPTRACE(adf_dp_trace(msdu, ADF_DP_TRACE_HTT_PACKET_PTR_RECORD,
-                adf_nbuf_data_addr(msdu),
-                sizeof(adf_nbuf_data(msdu)), ADF_TX));
 
     if (adf_nbuf_queue_len(&pdev->txnbufq) > 0) {
         HTT_TX_NBUF_QUEUE_ADD(pdev, msdu);
@@ -734,7 +672,7 @@ htt_tx_desc_display(void *tx_desc)
     htt_tx_desc = (struct htt_tx_msdu_desc_t *) tx_desc;
 
     /* only works for little-endian */
-    adf_os_print("HTT tx desc (@ %pK):\n", htt_tx_desc);
+    adf_os_print("HTT tx desc (@ %p):\n", htt_tx_desc);
     adf_os_print("  msg type = %d\n", htt_tx_desc->msg_type);
     adf_os_print("  pkt subtype = %d\n", htt_tx_desc->pkt_subtype);
     adf_os_print("  pkt type = %d\n", htt_tx_desc->pkt_type);
@@ -771,13 +709,11 @@ int htt_tx_ipa_uc_attach(struct htt_pdev_t *pdev,
     unsigned int uc_tx_partition_base)
 {
    unsigned int  tx_buffer_count;
-   unsigned int  tx_buffer_count_pwr2;
    adf_nbuf_t    buffer_vaddr;
    u_int32_t     buffer_paddr;
    u_int32_t    *header_ptr;
    u_int32_t    *ring_vaddr;
    int           return_code = 0;
-   uint16_t     idx;
 
    /* Allocate CE Write Index WORD */
    pdev->ipa_uc_tx_rsc.tx_ce_idx.vaddr =
@@ -786,7 +722,7 @@ int htt_tx_ipa_uc_attach(struct htt_pdev_t *pdev,
                 &pdev->ipa_uc_tx_rsc.tx_ce_idx.paddr,
                 adf_os_get_dma_mem_context(
                    (&pdev->ipa_uc_tx_rsc.tx_ce_idx), memctx));
-   if (NULL == pdev->ipa_uc_tx_rsc.tx_ce_idx.vaddr) {
+   if (!pdev->ipa_uc_tx_rsc.tx_ce_idx.vaddr) {
       adf_os_print("%s: CE Write Index WORD alloc fail", __func__);
       return -1;
    }
@@ -798,7 +734,7 @@ int htt_tx_ipa_uc_attach(struct htt_pdev_t *pdev,
                 &pdev->ipa_uc_tx_rsc.tx_comp_base.paddr,
                 adf_os_get_dma_mem_context(
                    (&pdev->ipa_uc_tx_rsc.tx_comp_base), memctx));
-   if (NULL == pdev->ipa_uc_tx_rsc.tx_comp_base.vaddr) {
+   if (!pdev->ipa_uc_tx_rsc.tx_comp_base.vaddr) {
       adf_os_print("%s: TX COMP ring alloc fail", __func__);
       return_code = -2;
       goto free_tx_ce_idx;
@@ -830,7 +766,7 @@ int htt_tx_ipa_uc_attach(struct htt_pdev_t *pdev,
       {
          adf_os_print("%s: TX BUF alloc fail, allocated buffer count %d",
                       __func__, tx_buffer_count);
-         break;
+         return 0;
       }
 
       /* Init buffer */
@@ -861,27 +797,7 @@ int htt_tx_ipa_uc_attach(struct htt_pdev_t *pdev,
       ring_vaddr++;
    }
 
-   /*
-    * Tx complete ring buffer count should be power of 2.
-    * So, allocated Tx buffer count should be one less than ring buffer size.
-    */
-   tx_buffer_count_pwr2 = vos_rounddown_pow_of_two(tx_buffer_count + 1) - 1;
-   if (tx_buffer_count > tx_buffer_count_pwr2) {
-       adf_os_print("%s: Allocated Tx buffer count %d is rounded down to %d",
-                   __func__, tx_buffer_count, tx_buffer_count_pwr2);
-
-       /* Free over allocated buffers below power of 2 */
-       for(idx = tx_buffer_count_pwr2; idx < tx_buffer_count; idx++) {
-           if (pdev->ipa_uc_tx_rsc.tx_buf_pool_vaddr_strg[idx]) {
-               adf_nbuf_unmap(pdev->osdev,
-                   pdev->ipa_uc_tx_rsc.tx_buf_pool_vaddr_strg[idx],
-                   ADF_OS_DMA_FROM_DEVICE);
-               adf_nbuf_free(pdev->ipa_uc_tx_rsc.tx_buf_pool_vaddr_strg[idx]);
-           }
-       }
-   }
-
-   pdev->ipa_uc_tx_rsc.alloc_tx_buf_cnt = tx_buffer_count_pwr2;
+   pdev->ipa_uc_tx_rsc.alloc_tx_buf_cnt = tx_buffer_count;
 
    return 0;
 
@@ -946,7 +862,7 @@ int htt_tx_credit_update(struct htt_pdev_t *pdev)
    int credit_delta;
    credit_delta = MIN(adf_os_atomic_read(&pdev->htt_tx_credit.target_delta),
                       adf_os_atomic_read(&pdev->htt_tx_credit.bus_delta));
-   if (credit_delta > 0) {
+   if (credit_delta) {
       adf_os_atomic_add(-credit_delta, &pdev->htt_tx_credit.target_delta);
       adf_os_atomic_add(-credit_delta, &pdev->htt_tx_credit.bus_delta);
    }

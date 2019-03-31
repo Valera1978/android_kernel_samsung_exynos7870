@@ -111,6 +111,4 @@ tSirRetStatus limSendExcludeUnencryptInd(tpAniSirGlobal pMac,
                                          tANI_BOOLEAN excludeUnenc,
                                          tpPESession  psessionEntry );
 #endif
-void limHandleSmeJoinResult(tpAniSirGlobal, tSirResultCodes,
-                            tANI_U16, tpPESession);
 #endif

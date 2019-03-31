@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2014, 2016, 2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -129,7 +129,6 @@ v_BOOL_t hdd_add_wowl_ptrn (hdd_adapter_t *pAdapter, const char * ptrn)
   tHalHandle hHal = WLAN_HDD_GET_HAL_CTX(pAdapter);
   v_U8_t sessionId = pAdapter->sessionId;
   hdd_context_t *pHddCtx = pAdapter->pHddCtx;
-  unsigned char invalid_ptrn = 0;
 
   len = find_ptrn_len(ptrn);
 
@@ -138,43 +137,45 @@ v_BOOL_t hdd_add_wowl_ptrn (hdd_adapter_t *pAdapter, const char * ptrn)
   while ( len >= 11 )
   {
     // Detect duplicate pattern
-    for (i=0; i<pHddCtx->cfg_ini->maxWoWFilters; i++) {
-      if (g_hdd_wowl_ptrns[i] == NULL) continue;
+    for (i=0; i<pHddCtx->cfg_ini->maxWoWFilters; i++)
+    {
+      if(g_hdd_wowl_ptrns[i] == NULL) continue;
 
-      if (strlen(g_hdd_wowl_ptrns[i]) == len) {
-        if (!memcmp(ptrn, g_hdd_wowl_ptrns[i], len)) {
-          // Pattern Already configured, skip to next pattern
-          VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
-              "Trying to add duplicate WoWL pattern. Skip it!");
-          ptrn += len;
-          goto next_ptrn;
-        }
+      if(!memcmp(ptrn, g_hdd_wowl_ptrns[i], len))
+      {
+        // Pattern Already configured, skip to next pattern
+        VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
+            "Trying to add duplicate WoWL pattern. Skip it!");
+        ptrn += len;
+        goto next_ptrn;
       }
     }
 
     first_empty_slot = -1;
 
     // Find an empty slot to store the pattern
-    for (i=0; i<pHddCtx->cfg_ini->maxWoWFilters; i++) {
-      if (g_hdd_wowl_ptrns[i] == NULL) {
+    for (i=0; i<pHddCtx->cfg_ini->maxWoWFilters; i++)
+    {
+      if(g_hdd_wowl_ptrns[i] == NULL) {
         first_empty_slot = i;
         break;
       }
     }
 
     // Maximum number of patterns have been configured already
-    if (first_empty_slot == -1) {
+    if(first_empty_slot == -1)
+    {
       VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
           "%s: Cannot add anymore patterns. No free slot!", __func__);
       return VOS_FALSE;
     }
 
     //Validate the pattern
-    if (ptrn[2] != WOWL_INTRA_PTRN_TOKENIZER ||
-        ptrn[5] != WOWL_INTRA_PTRN_TOKENIZER) {
+    if(ptrn[2] != WOWL_INTRA_PTRN_TOKENIZER ||
+       ptrn[5] != WOWL_INTRA_PTRN_TOKENIZER)
+    {
       VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
           "%s: Malformed pattern string. Skip!", __func__);
-      invalid_ptrn = 1;
       ptrn += len;
       goto next_ptrn;
     }
@@ -187,31 +188,31 @@ v_BOOL_t hdd_add_wowl_ptrn (hdd_adapter_t *pAdapter, const char * ptrn)
     localPattern.ucPatternMaskSize =
       ( hdd_parse_hex( ptrn[3] ) * 0x10 ) + hdd_parse_hex( ptrn[4] );
 
-    if (localPattern.ucPatternSize > SIR_WOWL_BCAST_PATTERN_MAX_SIZE ||
-        localPattern.ucPatternMaskSize > WOWL_PTRN_MASK_MAX_SIZE) {
+    if(localPattern.ucPatternSize > SIR_WOWL_BCAST_PATTERN_MAX_SIZE ||
+       localPattern.ucPatternMaskSize > WOWL_PTRN_MASK_MAX_SIZE)
+    {
       VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
           "%s: Invalid length specified. Skip!", __func__);
-      invalid_ptrn = 1;
       ptrn += len;
       goto next_ptrn;
     }
 
     //compute the offset of tokenizer after the pattern
     offset = 5 + 2*localPattern.ucPatternSize + 1;
-    if (offset >= len || ptrn[offset] != WOWL_INTRA_PTRN_TOKENIZER) {
+    if(offset >= len || ptrn[offset] != WOWL_INTRA_PTRN_TOKENIZER)
+    {
       VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
           "%s: Malformed pattern string..skip!", __func__);
-      invalid_ptrn = 1;
       ptrn += len;
       goto next_ptrn;
     }
 
     /* Compute the end of pattern string */
     offset = offset + 2*localPattern.ucPatternMaskSize;
-    if (offset+1 != len) { //offset begins with 0
+    if(offset+1 != len) //offset begins with 0
+    {
       VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
           "%s: Malformed pattern string...skip!", __func__);
-      invalid_ptrn = 1;
       ptrn += len;
       goto next_ptrn;
     }
@@ -222,7 +223,8 @@ v_BOOL_t hdd_add_wowl_ptrn (hdd_adapter_t *pAdapter, const char * ptrn)
     ptrn += 6;
 
     // Extract the pattern
-    for (i=0; i < localPattern.ucPatternSize; i++) {
+    for(i=0; i < localPattern.ucPatternSize; i++)
+    {
       localPattern.ucPattern[i] =
         (hdd_parse_hex( ptrn[0] ) * 0x10 ) + hdd_parse_hex( ptrn[1] );
       ptrn += 2; //skip to next byte
@@ -231,15 +233,17 @@ v_BOOL_t hdd_add_wowl_ptrn (hdd_adapter_t *pAdapter, const char * ptrn)
     ptrn++; /* Skip over the ':' separator after the pattern */
 
     // Extract the pattern Mask
-    for (i=0; i < localPattern.ucPatternMaskSize; i++) {
+    for(i=0; i < localPattern.ucPatternMaskSize; i++)
+    {
       localPattern.ucPatternMask[i] =
         (hdd_parse_hex( ptrn[0] ) * 0x10 ) + hdd_parse_hex( ptrn[1] );
       ptrn += 2; //skip to next byte
     }
 
     //All is good. Store the pattern locally
-    g_hdd_wowl_ptrns[first_empty_slot] = (char*) vos_mem_malloc(len+1);
-    if (g_hdd_wowl_ptrns[first_empty_slot] == NULL) {
+    g_hdd_wowl_ptrns[first_empty_slot] = (char*) kmalloc(len+1, GFP_KERNEL);
+    if(g_hdd_wowl_ptrns[first_empty_slot] == NULL)
+    {
       VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
           "%s: kmalloc failure", __func__);
       return VOS_FALSE;
@@ -258,7 +262,7 @@ v_BOOL_t hdd_add_wowl_ptrn (hdd_adapter_t *pAdapter, const char * ptrn)
       // Add failed, so invalidate the local storage
       VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
           "sme_WowlAddBcastPattern failed with error code (%d)", halStatus );
-      vos_mem_free(g_hdd_wowl_ptrns[first_empty_slot]);
+      kfree(g_hdd_wowl_ptrns[first_empty_slot]);
       g_hdd_wowl_ptrns[first_empty_slot] = NULL;
     }
 
@@ -274,9 +278,6 @@ v_BOOL_t hdd_add_wowl_ptrn (hdd_adapter_t *pAdapter, const char * ptrn)
     else
       break;
   }
-
-  if (invalid_ptrn)
-    return VOS_FALSE;
 
   return VOS_TRUE;
 }
@@ -320,7 +321,7 @@ v_BOOL_t hdd_del_wowl_ptrn (hdd_adapter_t *pAdapter, const char * ptrn)
       VOS_TRACE( VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_ERROR,
           "Deleted pattern with id %d [%s]", id, g_hdd_wowl_ptrns[id]);
 
-      vos_mem_free(g_hdd_wowl_ptrns[id]);
+      kfree(g_hdd_wowl_ptrns[id]);
       g_hdd_wowl_ptrns[id] = NULL;
       return VOS_TRUE;
     }

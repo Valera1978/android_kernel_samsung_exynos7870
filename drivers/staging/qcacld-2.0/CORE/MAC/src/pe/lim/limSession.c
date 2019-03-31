@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -128,7 +128,8 @@ void pe_reset_protection_callback(void *ptr)
 
     VOS_TRACE(VOS_MODULE_ID_PE,
               VOS_TRACE_LEVEL_INFO,
-              FL("old protection state: 0x%04X, new protection state: 0x%04X"),
+              FL("old protection state: 0x%04X, "
+                 "new protection state: 0x%04X\n"),
               pe_session_entry->old_protection_state,
               current_protection_state);
 
@@ -143,18 +144,9 @@ void pe_reset_protection_callback(void *ptr)
 
     vos_mem_zero(&pe_session_entry->gLimOlbcParams,
                  sizeof(pe_session_entry->gLimOlbcParams));
-    /*
-     * Do not reset fShortPreamble and beaconInterval, as they
-     * are not updated.
-     */
-    pe_session_entry->beaconParams.llaCoexist = 0;
-    pe_session_entry->beaconParams.llbCoexist = 0;
-    pe_session_entry->beaconParams.llgCoexist = 0;
-    pe_session_entry->beaconParams.ht20Coexist = 0;
-    pe_session_entry->beaconParams.llnNonGFCoexist = 0;
-    pe_session_entry->beaconParams.fRIFSMode = 0;
-    pe_session_entry->beaconParams.fLsigTXOPProtectionFullSupport = 0;
-    pe_session_entry->beaconParams.gHTObssMode = 0;
+
+    vos_mem_zero(&pe_session_entry->beaconParams,
+                 sizeof(pe_session_entry->beaconParams));
 
     vos_mem_zero(&mac_ctx->lim.gLimOverlap11gParams,
                  sizeof(mac_ctx->lim.gLimOverlap11gParams));
@@ -167,7 +159,6 @@ void pe_reset_protection_callback(void *ptr)
 
     old_op_mode = pe_session_entry->htOperMode;
     pe_session_entry->htOperMode = eSIR_HT_OP_MODE_PURE;
-    mac_ctx->lim.gHTOperMode = eSIR_HT_OP_MODE_PURE;
 
     vos_mem_zero(&beacon_params, sizeof(tUpdateBeaconParams));
     /* index 0, is self node, peers start from 1 */
@@ -188,7 +179,7 @@ void pe_reset_protection_callback(void *ptr)
         (VOS_FALSE == mac_ctx->sap.SapDfsInfo.is_dfs_cac_timer_running)) {
         VOS_TRACE(VOS_MODULE_ID_PE,
                   VOS_TRACE_LEVEL_ERROR,
-                  FL("protection changed, update beacon template"));
+                  FL("protection changed, update beacon template\n"));
         /* update beacon fix params and send update to FW */
         vos_mem_zero(&beacon_params, sizeof(tUpdateBeaconParams));
         beacon_params.bssIdx = pe_session_entry->bssIdx;
@@ -212,7 +203,6 @@ void pe_reset_protection_callback(void *ptr)
                     pe_session_entry->beaconParams.fRIFSMode;
         beacon_params.smeSessionId =
                     pe_session_entry->smeSessionId;
-        beacon_params.paramChangeBitmap |= PARAM_llBCOEXIST_CHANGED;
         bcn_prms_changed = true;
     }
 
@@ -227,100 +217,9 @@ void pe_reset_protection_callback(void *ptr)
                              SCH_PROTECTION_RESET_TIME)) {
         VOS_TRACE(VOS_MODULE_ID_PE,
                   VOS_TRACE_LEVEL_ERROR,
-                  FL("cannot create or start protectionFieldsResetTimer"));
+                  FL("cannot create or start protectionFieldsResetTimer\n"));
     }
 }
-
-#ifdef WLAN_FEATURE_FILS_SK
-/**
- * pe_delete_fils_info: API to delete fils session info
- * @session: pe session
- *
- * Return: void
- */
-void pe_delete_fils_info(tpPESession session)
-{
-    struct pe_fils_session *fils_info;
-
-    if (!session || (session && !session->valid)) {
-        VOS_TRACE(VOS_MODULE_ID_PE, VOS_TRACE_LEVEL_DEBUG,
-              FL("session is not valid"));
-        return;
-    }
-    fils_info = session->fils_info;
-    if (!fils_info) {
-        VOS_TRACE(VOS_MODULE_ID_PE, VOS_TRACE_LEVEL_DEBUG,
-              FL("fils info not found"));
-        return;
-    }
-    if (fils_info->keyname_nai_data)
-        vos_mem_free(fils_info->keyname_nai_data);
-    if (fils_info->fils_erp_reauth_pkt)
-        vos_mem_free(fils_info->fils_erp_reauth_pkt);
-    if (fils_info->fils_r_rk)
-        vos_mem_free(fils_info->fils_r_rk);
-    if (fils_info->fils_r_ik)
-        vos_mem_free(fils_info->fils_r_ik);
-    if (fils_info->fils_eap_finish_pkt)
-        vos_mem_free(fils_info->fils_eap_finish_pkt);
-    if (fils_info->fils_rmsk)
-        vos_mem_free(fils_info->fils_rmsk);
-    if (fils_info->fils_pmk)
-        vos_mem_free(fils_info->fils_pmk);
-    if (fils_info->auth_info.keyname)
-        vos_mem_free(fils_info->auth_info.keyname);
-    if (fils_info->auth_info.domain_name)
-        vos_mem_free(fils_info->auth_info.domain_name);
-    vos_mem_zero(fils_info->ick, MAX_ICK_LEN);
-    vos_mem_zero(fils_info->kek, MAX_KEK_LEN);
-    vos_mem_zero(fils_info->tk, MAX_TK_LEN);
-    vos_mem_zero(fils_info->key_auth, MAX_KEY_AUTH_DATA_LEN);
-    vos_mem_zero(fils_info->ap_key_auth_data, MAX_KEY_AUTH_DATA_LEN);
-    vos_mem_zero(fils_info->gtk, MAX_GTK_LEN);
-    vos_mem_zero(fils_info->igtk, MAX_IGTK_LEN);
-    vos_mem_zero(fils_info->ipn, IPN_LEN);
-
-    vos_mem_free(fils_info);
-    session->fils_info = NULL;
-}
-/**
- * pe_init_fils_info: API to initialize fils session info elements to null
- * @session: pe session
- *
- * Return: void
- */
-static void pe_init_fils_info(tpPESession session)
-{
-    struct pe_fils_session *fils_info;
-
-    if (!session || (session && !session->valid)) {
-        VOS_TRACE(VOS_MODULE_ID_PE, VOS_TRACE_LEVEL_DEBUG,
-              FL("session is not valid"));
-        return;
-    }
-    session->fils_info = vos_mem_malloc(sizeof(struct pe_fils_session));
-    fils_info = session->fils_info;
-    if (!fils_info) {
-        VOS_TRACE(VOS_MODULE_ID_PE, VOS_TRACE_LEVEL_DEBUG,
-              FL("fils info not found"));
-        return;
-    }
-
-    vos_mem_set(session->fils_info, sizeof(struct pe_fils_session), 0);
-    fils_info->keyname_nai_data = NULL;
-    fils_info->fils_erp_reauth_pkt = NULL;
-    fils_info->fils_r_rk = NULL;
-    fils_info->fils_r_ik = NULL;
-    fils_info->fils_eap_finish_pkt = NULL;
-    fils_info->fils_rmsk = NULL;
-    fils_info->fils_pmk = NULL;
-    fils_info->auth_info.keyname = NULL;
-    fils_info->auth_info.domain_name = NULL;
-}
-#else
-static void pe_delete_fils_info(tpPESession session) { }
-static void pe_init_fils_info(tpPESession session) { }
-#endif
 
 /*--------------------------------------------------------------------------
 
@@ -396,8 +295,6 @@ tpPESession peCreateSession(tpAniSirGlobal pMac,
 
             /* Copy the BSSID to the session table */
             sirCopyMacAddr(pMac->lim.gpSession[i].bssId, bssid);
-            if (bssType == eSIR_MONITOR_MODE)
-                sirCopyMacAddr(pMac->lim.gpSession[i].selfMacAddr, bssid);
             pMac->lim.gpSession[i].valid = TRUE;
 
             /* Initialize the SME and MLM states to IDLE */
@@ -434,13 +331,12 @@ tpPESession peCreateSession(tpAniSirGlobal pMac,
 #endif
             pMac->lim.gpSession[i].fWaitForProbeRsp = 0;
             pMac->lim.gpSession[i].fIgnoreCapsChange = 0;
-            /* following is invalid value since seq number is 12 bit */
-            pMac->lim.gpSession[i].prev_auth_seq_num = 0xFFFF;
 
             VOS_TRACE(VOS_MODULE_ID_PE, VOS_TRACE_LEVEL_DEBUG,
               "Create a new PE session (%d) with BSSID: "
                MAC_ADDRESS_STR " Max No. of STA %d",
-               *sessionId, MAC_ADDR_ARRAY(bssid), numSta);
+               pMac->lim.gpSession[i].peSessionId,
+               MAC_ADDR_ARRAY(bssid), numSta);
             pMac->lim.gpSession[i].roaming_in_progress = false;
 
             /* Initialize PMM Ps Offload Module */
@@ -450,7 +346,7 @@ tpPESession peCreateSession(tpAniSirGlobal pMac,
                    != eHAL_STATUS_SUCCESS)
                 {
                     limLog(pMac, LOGE,
-                       FL("Failed to open ps offload for pe session %x"), i);
+                       FL("Failed to open ps offload for pe session %x\n"),i);
                 }
             }
 
@@ -491,8 +387,6 @@ tpPESession peCreateSession(tpAniSirGlobal pMac,
                limFTOpen(pMac, &pMac->lim.gpSession[i]);
             }
 #endif
-            if (eSIR_MONITOR_MODE == bssType)
-               limFTOpen(pMac, &pMac->lim.gpSession[i]);
 
             if (eSIR_INFRA_AP_MODE == bssType) {
                 pMac->lim.gpSession[i].old_protection_state = 0;
@@ -509,17 +403,15 @@ tpPESession peCreateSession(tpAniSirGlobal pMac,
                 if (status != VOS_STATUS_SUCCESS) {
                     VOS_TRACE(VOS_MODULE_ID_PE,
                               VOS_TRACE_LEVEL_ERROR,
-                              FL("cannot create or start protectionFieldsResetTimer"));
+                              FL("cannot create or start "
+                                 "protectionFieldsResetTimer\n"));
                 }
             }
-
-            pe_init_fils_info(&pMac->lim.gpSession[i]);
 
             return(&pMac->lim.gpSession[i]);
         }
     }
-    limLog(pMac, LOGE,
-            FL("Session can not be created.. Reached Max permitted sessions"));
+    limLog(pMac, LOGE, FL("Session can not be created.. Reached Max permitted sessions \n "));
     return NULL;
 }
 
@@ -551,7 +443,7 @@ tpPESession peFindSessionByBssid(tpAniSirGlobal pMac,  tANI_U8*  bssid,    tANI_
         }
     }
 
-    limLog(pMac, LOG4, FL("Session lookup fails for BSSID:"));
+    limLog(pMac, LOG4, FL("Session lookup fails for BSSID: \n "));
     limPrintMacAddr(pMac, bssid, LOG4);
     return(NULL);
 
@@ -610,34 +502,6 @@ tpPESession pe_find_session_by_sme_session_id(tpAniSirGlobal mac_ctx,
 	return NULL;
 }
 
-/**
- * pe_count_session_with_sme_session_id() - count PE sessions for given sme
- * session id
- * @mac_ctx:          pointer to global adapter context
- * @sme_session_id:   sme session id
- *
- * count PE sessions for given sme session id
- *
- * Return: number of pe session entry for given sme session
- */
-uint8_t pe_count_session_with_sme_session_id(tpAniSirGlobal mac_ctx,
-					uint8_t sme_session_id)
-{
-	uint8_t i, count = 0;
-	for (i = 0; i < mac_ctx->lim.maxBssId; i++) {
-		if ((mac_ctx->lim.gpSession[i].valid) &&
-		    (mac_ctx->lim.gpSession[i].smeSessionId ==
-			sme_session_id)) {
-			count++;
-		}
-	}
-	limLog(mac_ctx, LOG4,
-	       FL("%d sessions found for smeSessionID: %d"),
-	       count, sme_session_id);
-	return count;
-}
-
-
 /*--------------------------------------------------------------------------
   \brief peFindSessionBySessionId() - looks up the PE session given the session ID.
 
@@ -655,7 +519,7 @@ uint8_t pe_count_session_with_sme_session_id(tpAniSirGlobal mac_ctx,
 {
     if(sessionId >=  pMac->lim.maxBssId)
     {
-        limLog(pMac, LOGE, FL("Invalid sessionId: %d"), sessionId);
+        limLog(pMac, LOGE, FL("Invalid sessionId: %d \n "), sessionId);
         return(NULL);
     }
     if((pMac->lim.gpSession[sessionId].valid == TRUE))
@@ -702,7 +566,7 @@ tpPESession peFindSessionByStaId(tpAniSirGlobal pMac,  tANI_U8  staid,    tANI_U
        }
     }
 
-    limLog(pMac, LOG4, FL("Session lookup fails for StaId: %d"), staid);
+    limLog(pMac, LOG4, FL("Session lookup fails for StaId: %d\n "), staid);
     return(NULL);
 }
 
@@ -722,12 +586,6 @@ void peDeleteSession(tpAniSirGlobal pMac, tpPESession psessionEntry)
     tANI_U16 i = 0;
     tANI_U16 n;
     TX_TIMER *timer_ptr;
-
-    if (!psessionEntry->valid) {
-        limLog(pMac, LOG1, FL("peSession %d already deleted"),
-                   psessionEntry->peSessionId);
-        return;
-    }
 
     VOS_TRACE(VOS_MODULE_ID_PE, VOS_TRACE_LEVEL_DEBUG,
           "Trying to delete PE session %d Opmode %d BssIdx %d"
@@ -804,21 +662,18 @@ void peDeleteSession(tpAniSirGlobal pMac, tpPESession psessionEntry)
     {
         vos_mem_free( psessionEntry->beacon);
         psessionEntry->beacon = NULL;
-        psessionEntry->bcnLen = 0;
     }
 
     if (psessionEntry->assocReq != NULL)
     {
         vos_mem_free( psessionEntry->assocReq);
         psessionEntry->assocReq = NULL;
-        psessionEntry->assocReqLen = 0;
     }
 
     if (psessionEntry->assocRsp != NULL)
     {
         vos_mem_free( psessionEntry->assocRsp);
         psessionEntry->assocRsp = NULL;
-        psessionEntry->assocRspLen = 0;
     }
 
 
@@ -920,17 +775,10 @@ void peDeleteSession(tpAniSirGlobal pMac, tpPESession psessionEntry)
 
 #ifdef WLAN_FEATURE_11W
     /* if PMF connection */
-    if (psessionEntry->limRmfEnabled && LIM_IS_STA_ROLE(psessionEntry)) {
+    if (psessionEntry->limRmfEnabled) {
         vos_timer_destroy(&psessionEntry->pmfComebackTimer);
     }
 #endif
-
-    if (psessionEntry->access_policy_vendor_ie)
-        vos_mem_free(psessionEntry->access_policy_vendor_ie);
-
-    psessionEntry->access_policy_vendor_ie = NULL;
-
-    pe_delete_fils_info(psessionEntry);
 
     psessionEntry->valid = FALSE;
 
@@ -976,7 +824,7 @@ tpPESession peFindSessionByPeerSta(tpAniSirGlobal pMac,  tANI_U8*  sa,    tANI_U
       }
    }
 
-   limLog(pMac, LOG1, FL("Session lookup fails for Peer StaId:"));
+   limLog(pMac, LOG1, FL("Session lookup fails for Peer StaId: \n "));
    limPrintMacAddr(pMac, sa, LOG1);
    return NULL;
 }

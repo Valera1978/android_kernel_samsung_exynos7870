@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -44,7 +44,11 @@
 #include "ol_txrx_osif_api.h"
 #include "ol_params.h"
 #include <wdi_event_api.h>
-#include "vos_cnss.h"
+
+#ifdef CONFIG_CNSS
+#include <net/cnss.h>
+#endif
+
 
 #include "ol_ctrl_addba_api.h"
 typedef void * hif_handle_t;
@@ -85,10 +89,9 @@ enum ol_ath_tx_ecodes  {
 } ;
 
 #ifdef HIF_SDIO
-#define MAX_FILE_NAME	NAME_MAX
+#define MAX_FILE_NAME     20
 struct ol_fw_files {
     char image_file[MAX_FILE_NAME];
-    char ibss_image_file[MAX_FILE_NAME];
     char board_data[MAX_FILE_NAME];
     char otp_data[MAX_FILE_NAME];
     char utf_file[MAX_FILE_NAME];
@@ -146,18 +149,6 @@ struct fw_ramdump {
     A_UINT32 start_addr;
     A_UINT32 length;
     A_UINT8 *mem;
-};
-#endif
-#ifdef CONFIG_NON_QC_PLATFORM_PCI
-#define MAX_FILE_NAME        20
-struct non_qc_platform_pci_fw_files {
-    char image_file[MAX_FILE_NAME];
-    char board_data[MAX_FILE_NAME];
-    char otp_data[MAX_FILE_NAME];
-    char utf_file[MAX_FILE_NAME];
-    char utf_board_data[MAX_FILE_NAME];
-    char epping_file[MAX_FILE_NAME];
-    char evicted_data[MAX_FILE_NAME];
 };
 #endif
 
@@ -286,14 +277,12 @@ struct ol_softc {
     u_int32_t               set_ht_vht_ies:1; /* true if vht ies are set on target */
     bool                    scn_cwmenable;    /*CWM enable/disable state*/
     u_int8_t                max_no_of_peers;
-#ifdef CONFIG_NON_QC_PLATFORM_PCI
-    struct non_qc_platform_pci_fw_files fw_files;
-#elif defined(HIF_PCI)
+#ifdef CONFIG_CNSS
     struct cnss_fw_files fw_files;
 #elif defined(HIF_SDIO)
     struct ol_fw_files fw_files;
 #endif
-#if defined(CONFIG_CNSS) || defined(HIF_SDIO) || defined(HIF_PCI)
+#if defined(CONFIG_CNSS) || defined(HIF_SDIO)
     void *ramdump_base;
     unsigned long ramdump_address;
     unsigned long ramdump_size;

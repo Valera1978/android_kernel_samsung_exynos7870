@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2014, 2016, 2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012, 2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -71,33 +71,6 @@
  *   Type declarations
  *-------------------------------------------------------------------------*/
 
-/**
- * enum suspend_resume_state - Suspend resume state
- * @HDD_WLAN_EARLY_SUSPEND: Early suspend state.
- * @HDD_WLAN_SUSPEND: Suspend state.
- * @HDD_WLAN_EARLY_RESUME: Early resume state.
- * @HDD_WLAN_RESUME: Resume state.
- *
- * Suspend state to indicate in diag event of suspend resume.
- */
-
-enum suspend_resume_state {
-	 HDD_WLAN_EARLY_SUSPEND,
-	 HDD_WLAN_SUSPEND,
-	 HDD_WLAN_EARLY_RESUME,
-	 HDD_WLAN_RESUME
-};
-
-#ifdef FEATURE_WLAN_THERMAL_SHUTDOWN
-enum thermal_suspend_state {
-	HDD_WLAN_THERMAL_ACTIVE,
-	HDD_WLAN_THERMAL_SUSPENDING,
-	HDD_WLAN_THERMAL_SUSPENDED,
-	HDD_WLAN_THERMAL_RESUMING,
-	HDD_WLAN_THERMAL_DEINIT
-};
-#endif
-
 /*-------------------------------------------------------------------------
  * Function declarations and documentation
  * ------------------------------------------------------------------------*/
@@ -114,7 +87,6 @@ enum thermal_suspend_state {
  /* SSR shutdown & re-init functions */
  VOS_STATUS hdd_wlan_shutdown(void);
  VOS_STATUS hdd_wlan_re_init(void *hif_sc);
- void hdd_wlan_cleanup(void);
 
 void hdd_conf_mcastbcast_filter(hdd_context_t* pHddCtx, v_BOOL_t setfilter);
 VOS_STATUS hdd_conf_arp_offload(hdd_adapter_t* pAdapter, int fenable);
@@ -130,18 +102,6 @@ int wlan_hdd_ipv4_changed(struct notifier_block *nb,
 
 int wlan_hdd_ipv6_changed(struct notifier_block *nb,
 				unsigned long data, void *arg);
-
-void hdd_conf_ns_offload(hdd_adapter_t *pAdapter, int fenable);
-
-#ifdef FEATURE_WLAN_DIAG_SUPPORT
-void hdd_wlan_suspend_resume_event(uint8_t state);
-#else
-static inline
-void hdd_wlan_suspend_resume_event(uint8_t state)
-{
-	return;
-}
-#endif /* FEATURE_WLAN_DIAG_SUPPORT */
 
 
 #endif // if !defined __WLAN_QCT_DRIVER_H

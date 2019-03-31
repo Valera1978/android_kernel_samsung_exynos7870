@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2014, 2016-2017 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011, 2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -44,6 +44,9 @@
 #endif
 #include <ol_txrx.h>
 
+#ifdef QCA_SUPPORT_TXDESC_SANITY_CHECKS
+extern u_int32_t *g_dbg_htt_desc_end_addr, *g_dbg_htt_desc_start_addr;
+#endif
 
 #ifdef QCA_COMPUTE_TX_DELAY
 static inline void
@@ -63,21 +66,28 @@ ol_tx_desc_alloc(struct ol_txrx_pdev_t *pdev, struct ol_txrx_vdev_t *vdev)
     adf_os_spin_lock_bh(&pdev->tx_mutex);
     if (pdev->tx_desc.freelist) {
         pdev->tx_desc.num_free--;
-        tx_desc = &pdev->tx_desc.freelist->tx_desc;
+        tx_desc = pdev->tx_desc.freelist->tx_desc;
         pdev->tx_desc.freelist = pdev->tx_desc.freelist->next;
 #ifdef QCA_SUPPORT_TXDESC_SANITY_CHECKS
-        if (tx_desc->pkt_type != ol_tx_frm_freed
+        if (tx_desc->pkt_type != 0xff
 #ifdef QCA_COMPUTE_TX_DELAY
             || tx_desc->entry_timestamp_ticks != 0xffffffff
 #endif
            ) {
             TXRX_PRINT(TXRX_PRINT_LEVEL_ERR,
-                       "%s Potential tx_desc corruption pkt_type:0x%x pdev:0x%pK",
+                       "%s Potential tx_desc corruption pkt_type:0x%x pdev:0x%p",
                          __func__, tx_desc->pkt_type, pdev);
 #ifdef QCA_COMPUTE_TX_DELAY
             TXRX_PRINT(TXRX_PRINT_LEVEL_ERR, "%s Timestamp:0x%x\n",
                        __func__, tx_desc->entry_timestamp_ticks);
 #endif
+            adf_os_assert(0);
+        }
+        if ((u_int32_t *) tx_desc->htt_tx_desc < g_dbg_htt_desc_start_addr ||
+            (u_int32_t *) tx_desc->htt_tx_desc > g_dbg_htt_desc_end_addr) {
+            TXRX_PRINT(TXRX_PRINT_LEVEL_ERR,
+                       "%s Potential htt_desc curruption:0x%p pdev:0x%p\n",
+                       __func__, tx_desc->htt_tx_desc, pdev);
             adf_os_assert(0);
         }
 #endif
@@ -86,8 +96,9 @@ ol_tx_desc_alloc(struct ol_txrx_pdev_t *pdev, struct ol_txrx_vdev_t *vdev)
     if (!tx_desc) {
         return NULL;
     }
+#if defined(CONFIG_HL_SUPPORT)
     tx_desc->vdev = vdev;
-    tx_desc->vdev_id = vdev->vdev_id;
+#endif
 #if defined(CONFIG_PER_VDEV_TX_DESC_POOL)
     adf_os_atomic_inc(&vdev->tx_desc_count);
 #endif
@@ -111,68 +122,42 @@ ol_tx_desc_alloc_hl(struct ol_txrx_pdev_t *pdev, struct ol_txrx_vdev_t *vdev)
     return tx_desc;
 }
 
-#ifdef WLAN_FEATURE_DSRC
-static inline void
-__ol_tx_desc_free(struct ol_txrx_pdev_t *pdev, struct ol_tx_desc_t *tx_desc)
+/* TBD: make this inline in the .h file? */
+struct ol_tx_desc_t *
+ol_tx_desc_find(struct ol_txrx_pdev_t *pdev, u_int16_t tx_desc_id)
 {
-	((union ol_tx_desc_list_elem_t *)tx_desc)->next = NULL;
-	if (pdev->tx_desc.freelist) {
-		pdev->tx_desc.last->next =
-			(union ol_tx_desc_list_elem_t *)tx_desc;
-	} else {
-		pdev->tx_desc.freelist =
-			(union ol_tx_desc_list_elem_t *)tx_desc;
-	}
-	pdev->tx_desc.last = (union ol_tx_desc_list_elem_t *)tx_desc;
+    return pdev->tx_desc.array[tx_desc_id].tx_desc;
 }
-#else
-static inline void
-__ol_tx_desc_free(struct ol_txrx_pdev_t *pdev, struct ol_tx_desc_t *tx_desc)
-{
-	((union ol_tx_desc_list_elem_t *)tx_desc)->next =
-		pdev->tx_desc.freelist;
-	pdev->tx_desc.freelist = (union ol_tx_desc_list_elem_t *)tx_desc;
-}
-#endif /* WLAN_FEATURE_DSRC */
 
 void
 ol_tx_desc_free(struct ol_txrx_pdev_t *pdev, struct ol_tx_desc_t *tx_desc)
 {
     adf_os_spin_lock_bh(&pdev->tx_mutex);
 #ifdef QCA_SUPPORT_TXDESC_SANITY_CHECKS
-    tx_desc->pkt_type = ol_tx_frm_freed;
+    tx_desc->pkt_type = 0xff;
 #ifdef QCA_COMPUTE_TX_DELAY
     tx_desc->entry_timestamp_ticks = 0xffffffff;
 #endif
 #endif
-
-    __ol_tx_desc_free(pdev, tx_desc);
+    ((struct ol_tx_desc_list_elem_t *)(tx_desc->p_link))->next =
+        pdev->tx_desc.freelist;
+    pdev->tx_desc.freelist = tx_desc->p_link;
     pdev->tx_desc.num_free++;
-
 #if defined(CONFIG_PER_VDEV_TX_DESC_POOL)
-    if (tx_desc->vdev) {
 #ifdef QCA_LL_TX_FLOW_CT
-        if ( (adf_os_atomic_read(&tx_desc->vdev->os_q_paused)) &&
-             (adf_os_atomic_read(&tx_desc->vdev->tx_desc_count) <
-                               TXRX_HL_TX_FLOW_CTRL_VDEV_LOW_WATER_MARK) ) {
-            /* wakeup netif_queue */
-            adf_os_atomic_set(&tx_desc->vdev->os_q_paused, 0);
-            tx_desc->vdev->osif_flow_control_cb(tx_desc->vdev->osif_dev,
-                                             tx_desc->vdev_id, A_TRUE);
-        }
-#endif /* QCA_LL_TX_FLOW_CT */
-        adf_os_atomic_dec(&tx_desc->vdev->tx_desc_count);
-    } else {
-        TXRX_PRINT(TXRX_PRINT_LEVEL_INFO2,
-               "%s warning: the vdev is referred by tx_desc (%pK) "
-               "has been detached.\n",
-                 __func__, tx_desc);
+    if ( (adf_os_atomic_read(&tx_desc->vdev->os_q_paused)) &&
+         (adf_os_atomic_read(&tx_desc->vdev->tx_desc_count) <
+                           TXRX_HL_TX_FLOW_CTRL_VDEV_LOW_WATER_MARK) ) {
+        /* wakeup netif_queue */
+        adf_os_atomic_set(&tx_desc->vdev->os_q_paused, 0);
+        tx_desc->vdev->osif_flow_control_cb(tx_desc->vdev->osif_dev,
+                                         tx_desc->vdev->vdev_id, A_TRUE);
     }
+#endif /* QCA_LL_TX_FLOW_CT */
+    adf_os_atomic_dec(&tx_desc->vdev->tx_desc_count);
 #endif
-
 #if defined(CONFIG_HL_SUPPORT)
     tx_desc->vdev = NULL;
-    tx_desc->vdev_id = OL_TXRX_INVALID_VDEV_ID;
 #endif
     adf_os_spin_unlock_bh(&pdev->tx_mutex);
 }
@@ -357,7 +342,7 @@ void ol_tx_desc_frame_free_nonstd(
         adf_nbuf_set_next(tx_desc->netbuf, NULL);
         adf_nbuf_tx_free(tx_desc->netbuf, had_error);
     } else if ((tx_desc->pkt_type >= OL_TXRX_MGMT_TYPE_BASE) &&
-                (tx_desc->pkt_type != ol_tx_frm_freed)) {
+                (tx_desc->pkt_type != 0xff)) {
         /* FIX THIS -
          * The FW currently has trouble using the host's fragments table
          * for management frames.  Until this is fixed, rather than

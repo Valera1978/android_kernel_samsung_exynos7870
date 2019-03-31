@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -341,37 +341,27 @@ static tANI_U32 limPrepareTdlsFrameHeader(tpAniSirGlobal pMac, tANI_U8* pFrame,
     return(header_offset += PAYLOAD_TYPE_TDLS_SIZE) ;
 }
 
-/**
- * lim_mgmt_tdls_tx_complete - callback to indicate Tx completion
- * @mac_ctx: pointer to mac structure
- * @tx_complete: indicates tx sucess/failure
- *
- * function will be invoked on receiving tx completion indication
- *
- * return: success: eHAL_STATUS_SUCCESS failure: eHAL_STATUS_FAILURE
+/*
+ * TX Complete for Management frames
  */
-eHalStatus lim_mgmt_tdls_tx_complete(tpAniSirGlobal mac_ctx,
-				uint32_t tx_complete)
+ eHalStatus limMgmtTXComplete(tpAniSirGlobal pMac,
+                                   tANI_U32 txCompleteSuccess)
 {
-	tpPESession session_entry = NULL ;
+    tpPESession psessionEntry = NULL ;
 
-	limLog(mac_ctx, LOG1, FL("tdls_frm_session_id %x tx_complete %x"),
-		mac_ctx->lim.tdls_frm_session_id, tx_complete);
-
-	if (0xff != mac_ctx->lim.tdls_frm_session_id) {
-		session_entry = peFindSessionBySessionId(mac_ctx,
-					mac_ctx->lim.tdls_frm_session_id);
-		if (NULL == session_entry) {
-			limLog(mac_ctx, LOGE, FL("session id %d is not found"),
-				mac_ctx->lim.tdls_frm_session_id);
-			return eHAL_STATUS_FAILURE;
-		}
-
-		limSendSmeMgmtTXCompletion(mac_ctx, session_entry, tx_complete);
-		mac_ctx->lim.tdls_frm_session_id = 0xff;
-	}
-
-	return eHAL_STATUS_SUCCESS;
+    if (0xff != pMac->lim.mgmtFrameSessionId)
+    {
+        psessionEntry = peFindSessionBySessionId(pMac, pMac->lim.mgmtFrameSessionId);
+        if (NULL == psessionEntry)
+        {
+            limLog(pMac, LOGE, FL("sessionID %d is not found"),
+                               pMac->lim.mgmtFrameSessionId);
+            return eHAL_STATUS_FAILURE;
+        }
+        limSendSmeMgmtTXCompletion(pMac, psessionEntry, txCompleteSuccess);
+        pMac->lim.mgmtFrameSessionId = 0xff;
+    }
+    return eHAL_STATUS_SUCCESS;
 }
 
 /*
@@ -541,19 +531,18 @@ tSirRetStatus limSendTdlsDisReqFrame(tpAniSirGlobal pMac, tSirMacAddr peer_mac,
            limTraceTdlsActionString(SIR_MAC_TDLS_DIS_REQ),
            MAC_ADDR_ARRAY(peer_mac));
 
-    pMac->lim.tdls_frm_session_id = psessionEntry->peSessionId;
+    pMac->lim.mgmtFrameSessionId = psessionEntry->peSessionId;
     halstatus = halTxFrameWithTxComplete( pMac, pPacket, ( tANI_U16 ) nBytes,
                             HAL_TXRX_FRM_802_11_DATA,
                             ANI_TXDIR_TODS,
                             TID_AC_VI,
                             limTxComplete, pFrame,
-                            lim_mgmt_tdls_tx_complete,
-                            HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME |
-                            HAL_USE_PEER_STA_REQUESTED_MASK,
+                            limMgmtTXComplete,
+                            HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME,
                             smeSessionId, false );
     if ( ! HAL_STATUS_SUCCESS ( halstatus ) )
     {
-        pMac->lim.tdls_frm_session_id = 0xff;
+        pMac->lim.mgmtFrameSessionId = 0xff;
         limLog(pMac, LOGE, FL("could not send TDLS Discovery Request frame"));
         return eSIR_FAILURE;
     }
@@ -582,7 +571,6 @@ static void PopulateDot11fTdlsHtVhtCap(tpAniSirGlobal pMac, uint32 selfDot11Mode
     else
         nss = pMac->vdev_type_nss_2g.tdls;
 
-    nss = VOS_MIN(nss, pMac->user_configured_nss);
     if (IS_DOT11_MODE_HT(selfDot11Mode))
     {
         /* Include HT Capability IE */
@@ -726,8 +714,7 @@ static tSirRetStatus limSendTdlsDisRspFrame(tpAniSirGlobal pMac,
 
     /* populate supported rate and ext supported rate IE */
     if (eSIR_FAILURE == populate_dot11f_rates_tdls(pMac, &tdlsDisRsp.SuppRates,
-                               &tdlsDisRsp.ExtSuppRates,
-                               psessionEntry->currentOperChannel))
+                               &tdlsDisRsp.ExtSuppRates))
         limLog(pMac, LOGE, FL("could not populate supported data rates"));
 
 
@@ -859,7 +846,7 @@ static tSirRetStatus limSendTdlsDisRspFrame(tpAniSirGlobal pMac,
            MAC_ADDR_ARRAY(peerMac));
 
 
-    pMac->lim.tdls_frm_session_id = psessionEntry->peSessionId;
+    pMac->lim.mgmtFrameSessionId = psessionEntry->peSessionId;
     /*
      * Transmit Discovery response and watch if this is delivered to
      * peer STA.
@@ -873,11 +860,11 @@ static tSirRetStatus limSendTdlsDisRspFrame(tpAniSirGlobal pMac,
                             ANI_TXDIR_IBSS,
                             0,
                             limTxComplete, pFrame,
-                            lim_mgmt_tdls_tx_complete,
+                            limMgmtTXComplete,
                             HAL_USE_SELF_STA_REQUESTED_MASK, smeSessionId, false );
     if ( ! HAL_STATUS_SUCCESS ( halstatus ) )
     {
-        pMac->lim.tdls_frm_session_id = 0xff;
+        pMac->lim.mgmtFrameSessionId = 0xff;
         limLog(pMac, LOGE, FL("could not send TDLS Discovery Response frame!"));
         return eSIR_FAILURE;
     }
@@ -977,13 +964,9 @@ tSirRetStatus limSendTdlsLinkSetupReqFrame(tpAniSirGlobal pMac,
     }
     swapBitField16(caps, ( tANI_U16* )&tdlsSetupReq.Capabilities );
 
-    limLog(pMac, LOG1, FL("Sending operating channel %d and dotl11mode %d\n"),
-           psessionEntry->currentOperChannel, psessionEntry->dot11mode);
-
     /* populate supported rate and ext supported rate IE */
     populate_dot11f_rates_tdls(pMac, &tdlsSetupReq.SuppRates,
-                               &tdlsSetupReq.ExtSuppRates,
-                               psessionEntry->currentOperChannel);
+                               &tdlsSetupReq.ExtSuppRates);
 
     /* Populate extended supported rates */
     PopulateDot11fTdlsExtCapability(pMac, psessionEntry, &tdlsSetupReq.ExtCap);
@@ -1173,16 +1156,15 @@ tSirRetStatus limSendTdlsLinkSetupReqFrame(tpAniSirGlobal pMac,
                        limTraceTdlsActionString(SIR_MAC_TDLS_SETUP_REQ),
                        MAC_ADDR_ARRAY(peerMac));
 
-    pMac->lim.tdls_frm_session_id = psessionEntry->peSessionId;
+    pMac->lim.mgmtFrameSessionId = psessionEntry->peSessionId;
 #if defined(CONFIG_HL_SUPPORT)
     halstatus = halTxFrameWithTxComplete( pMac, pPacket, ( tANI_U16 ) nBytes,
                             HAL_TXRX_FRM_802_11_DATA,
                             ANI_TXDIR_TODS,
                             TID_AC_VI,
                             limTxComplete, pFrame,
-                            lim_mgmt_tdls_tx_complete,
-                            HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME |
-                            HAL_USE_PEER_STA_REQUESTED_MASK,
+                            limMgmtTXComplete,
+                            HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME,
                             smeSessionId, true );
 #else
     halstatus = halTxFrameWithTxComplete( pMac, pPacket, ( tANI_U16 ) nBytes,
@@ -1190,14 +1172,13 @@ tSirRetStatus limSendTdlsLinkSetupReqFrame(tpAniSirGlobal pMac,
                             ANI_TXDIR_TODS,
                             TID_AC_VI,
                             limTxComplete, pFrame,
-                            lim_mgmt_tdls_tx_complete,
-                            HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME |
-                            HAL_USE_PEER_STA_REQUESTED_MASK,
+                            limMgmtTXComplete,
+                            HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME,
                             smeSessionId, false );
 #endif
     if ( ! HAL_STATUS_SUCCESS ( halstatus ) )
     {
-        pMac->lim.tdls_frm_session_id = 0xff;
+        pMac->lim.mgmtFrameSessionId = 0xff;
         limLog(pMac, LOGE, FL("could not send TDLS Setup Request frame!"));
         return eSIR_FAILURE;
     }
@@ -1384,16 +1365,15 @@ tSirRetStatus limSendTdlsTeardownFrame(tpAniSirGlobal pMac,
                        "AP": "DIRECT"),
                        MAC_ADDR_ARRAY(peerMac));
 
-    pMac->lim.tdls_frm_session_id = psessionEntry->peSessionId;
+    pMac->lim.mgmtFrameSessionId = psessionEntry->peSessionId;
 #if defined(CONFIG_HL_SUPPORT)
     halstatus = halTxFrameWithTxComplete( pMac, pPacket, ( tANI_U16 ) nBytes,
                             HAL_TXRX_FRM_802_11_DATA,
                             ANI_TXDIR_TODS,
                             TID_AC_VI,
                             limTxComplete, pFrame,
-                            lim_mgmt_tdls_tx_complete,
-                            HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME |
-                            HAL_USE_PEER_STA_REQUESTED_MASK,
+                            limMgmtTXComplete,
+                            HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME,
                             smeSessionId,
                             (reason == eSIR_MAC_TDLS_TEARDOWN_PEER_UNREACHABLE) ? true : false );
 #else
@@ -1402,15 +1382,14 @@ tSirRetStatus limSendTdlsTeardownFrame(tpAniSirGlobal pMac,
                             ANI_TXDIR_TODS,
                             TID_AC_VI,
                             limTxComplete, pFrame,
-                            lim_mgmt_tdls_tx_complete,
-                            HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME |
-                            HAL_USE_PEER_STA_REQUESTED_MASK,
+                            limMgmtTXComplete,
+                            HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME,
                             smeSessionId,
                             false );
 #endif
     if ( ! HAL_STATUS_SUCCESS ( halstatus ) )
     {
-        pMac->lim.tdls_frm_session_id = 0xff;
+        pMac->lim.mgmtFrameSessionId = 0xff;
         limLog(pMac, LOGE, FL("could not send TDLS Teardown frame"));
         return eSIR_FAILURE;
 
@@ -1479,8 +1458,7 @@ static tSirRetStatus limSendTdlsSetupRspFrame(tpAniSirGlobal pMac,
 
     /* populate supported rate and ext supported rate IE */
     populate_dot11f_rates_tdls(pMac, &tdlsSetupRsp.SuppRates,
-                               &tdlsSetupRsp.ExtSuppRates,
-                               psessionEntry->currentOperChannel);
+                               &tdlsSetupRsp.ExtSuppRates);
 
     /* Populate extended supported rates */
     PopulateDot11fTdlsExtCapability(pMac, psessionEntry, &tdlsSetupRsp.ExtCap);
@@ -1665,16 +1643,15 @@ static tSirRetStatus limSendTdlsSetupRspFrame(tpAniSirGlobal pMac,
            limTraceTdlsActionString(SIR_MAC_TDLS_SETUP_RSP),
            MAC_ADDR_ARRAY(peerMac));
 
-    pMac->lim.tdls_frm_session_id = psessionEntry->peSessionId;
+    pMac->lim.mgmtFrameSessionId = psessionEntry->peSessionId;
 #if defined(CONFIG_HL_SUPPORT)
     halstatus = halTxFrameWithTxComplete( pMac, pPacket, ( tANI_U16 ) nBytes,
                             HAL_TXRX_FRM_802_11_DATA,
                             ANI_TXDIR_TODS,
                             TID_AC_VI,
                             limTxComplete, pFrame,
-                            lim_mgmt_tdls_tx_complete,
-                            HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME |
-                            HAL_USE_PEER_STA_REQUESTED_MASK,
+                            limMgmtTXComplete,
+                            HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME,
                             smeSessionId, true );
 #else
     halstatus = halTxFrameWithTxComplete( pMac, pPacket, ( tANI_U16 ) nBytes,
@@ -1682,14 +1659,13 @@ static tSirRetStatus limSendTdlsSetupRspFrame(tpAniSirGlobal pMac,
                             ANI_TXDIR_TODS,
                             TID_AC_VI,
                             limTxComplete, pFrame,
-                            lim_mgmt_tdls_tx_complete,
-                            HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME |
-                            HAL_USE_PEER_STA_REQUESTED_MASK,
+                            limMgmtTXComplete,
+                            HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME,
                             smeSessionId, false );
 #endif
     if ( ! HAL_STATUS_SUCCESS ( halstatus ) )
     {
-        pMac->lim.tdls_frm_session_id = 0xff;
+        pMac->lim.mgmtFrameSessionId = 0xff;
         limLog(pMac, LOGE, FL("could not send TDLS Setup Response"));
         return eSIR_FAILURE;
     }
@@ -1898,16 +1874,15 @@ tSirRetStatus limSendTdlsLinkSetupCnfFrame(tpAniSirGlobal pMac,
            limTraceTdlsActionString(SIR_MAC_TDLS_SETUP_CNF),
            MAC_ADDR_ARRAY(peerMac));
 
-    pMac->lim.tdls_frm_session_id = psessionEntry->peSessionId;
+    pMac->lim.mgmtFrameSessionId = psessionEntry->peSessionId;
 #if defined(CONFIG_HL_SUPPORT)
     halstatus = halTxFrameWithTxComplete( pMac, pPacket, ( tANI_U16 ) nBytes,
                             HAL_TXRX_FRM_802_11_DATA,
                             ANI_TXDIR_TODS,
                             TID_AC_VI,
                             limTxComplete, pFrame,
-                            lim_mgmt_tdls_tx_complete,
-                            HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME |
-                            HAL_USE_PEER_STA_REQUESTED_MASK,
+                            limMgmtTXComplete,
+                            HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME,
                             smeSessionId, true );
 #else
     halstatus = halTxFrameWithTxComplete( pMac, pPacket, ( tANI_U16 ) nBytes,
@@ -1915,15 +1890,14 @@ tSirRetStatus limSendTdlsLinkSetupCnfFrame(tpAniSirGlobal pMac,
                             ANI_TXDIR_TODS,
                             TID_AC_VI,
                             limTxComplete, pFrame,
-                            lim_mgmt_tdls_tx_complete,
-                            HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME |
-                            HAL_USE_PEER_STA_REQUESTED_MASK,
+                            limMgmtTXComplete,
+                            HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME,
                             smeSessionId, false );
 #endif
 
     if ( ! HAL_STATUS_SUCCESS ( halstatus ) )
     {
-        pMac->lim.tdls_frm_session_id = 0xff;
+        pMac->lim.mgmtFrameSessionId = 0xff;
         limLog(pMac, LOGE, FL("could not send TDLS Setup Confirm frame"));
         return eSIR_FAILURE;
 
@@ -2158,11 +2132,6 @@ limTdlsPopulateMatchingRateSet(tpAniSirGlobal pMac,
         if (wlan_cfgGetStr(pMac, WNI_CFG_EXTENDED_OPERATIONAL_RATE_SET,
                                                   (tANI_U8 *) &tempRateSet2.rate,
                                                   &val) != eSIR_SUCCESS)
-        {
-            // Could not get extended rateset from CFG. Log error.
-            limLog(pMac, LOGE, FL("could not retrieve extended rateset"));
-            val = 0;
-        }
         tempRateSet2.numRates = val;
     }
 
@@ -2266,7 +2235,6 @@ limTdlsPopulateMatchingRateSet(tpAniSirGlobal pMac,
         nss = pMac->vdev_type_nss_5g.tdls;
     else
         nss = pMac->vdev_type_nss_2g.tdls;
-    nss = VOS_MIN(nss, pMac->user_configured_nss);
     //compute the matching MCS rate set, if peer is 11n capable and self mode is 11n
 #ifdef FEATURE_WLAN_TDLS
     if (pStaDs->mlmStaContext.htCapability)
@@ -2332,6 +2300,8 @@ static void limTdlsUpdateHashNodeInfo(tpAniSirGlobal pMac, tDphHashNode *pStaDs,
     tDot11fIEVHTCaps vhtCap;
     tANI_U8 cbMode;
 #endif
+    tpDphHashNode pSessStaDs = NULL;
+    tANI_U16 aid;
 
     if (pTdlsAddStaReq->tdlsAddOper == TDLS_OPER_ADD)
     {
@@ -2346,27 +2316,8 @@ static void limTdlsUpdateHashNodeInfo(tpAniSirGlobal pMac, tDphHashNode *pStaDs,
     {
         pStaDs->mlmStaContext.htCapability = 1 ;
         pStaDs->htGreenfield = htCaps->greenField ;
-        /*
-         * pStaDs->htSupportedChannelWidthSet should have the base channel
-         * capability. The htSupportedChannelWidthSet of the TDLS link on
-         * base channel should be less than or equal to channel width of
-         * STA-AP link. So take this setting from the psessionEntry.
-         */
-        limLog(pMac, LOG1,
-               FL("supportedChannelWidthSet %x htSupportedChannelWidthSet %x"),
-               htCaps->supportedChannelWidthSet,
-               psessionEntry->htSupportedChannelWidthSet);
-
-        pStaDs->htSupportedChannelWidthSet =
-            (htCaps->supportedChannelWidthSet <
-              psessionEntry->htSupportedChannelWidthSet) ?
-                 htCaps->supportedChannelWidthSet :
-                 psessionEntry->htSupportedChannelWidthSet;
-
-        limLog(pMac, LOG1, FL("pStaDs->htSupportedChannelWidthSet %x"),
-               pStaDs->htSupportedChannelWidthSet);
-
-        pStaDs->htMIMOPSState = htCaps->mimoPowerSave ;
+        pStaDs->htSupportedChannelWidthSet =  htCaps->supportedChannelWidthSet ;
+        pStaDs->htMIMOPSState =             htCaps->mimoPowerSave ;
         pStaDs->htMaxAmsduLength =  htCaps->maximalAMSDUsize;
         pStaDs->htAMpduDensity =    htCaps->mpduDensity;
         pStaDs->htDsssCckRate40MHzSupport = htCaps->dsssCckMode40MHz ;
@@ -2390,15 +2341,32 @@ static void limTdlsUpdateHashNodeInfo(tpAniSirGlobal pMac, tDphHashNode *pStaDs,
     pVhtCaps = &vhtCap;
     if (pVhtCaps->present)
     {
-        pStaDs->mlmStaContext.vhtCapability = 1 ;
+       pStaDs->mlmStaContext.vhtCapability = 1 ;
 
-        /*
-         * channel width of TDLS link on base channel should not exceed
-         * channel width of STA-AP link. Hence take this setting from the
-         * psessionEntry.
-         */
-        pStaDs->vhtSupportedChannelWidthSet =
-                psessionEntry->vhtTxChannelWidthSet;
+       if (psessionEntry->currentOperChannel <= SIR_11B_CHANNEL_END)
+        {
+            /*
+             * if the channel is 2G then update the min channel widthset in
+             * pStaDs. These values are used when sending a AddSta request to
+             * firmware
+             * 11.21.1 General: The channel width of the TDLS direct link on the
+             * base channel shall not exceed the channel width of the BSS to
+             * which the TDLS peer STAs are associated.
+             */
+            pStaDs->vhtSupportedChannelWidthSet = WNI_CFG_VHT_CHANNEL_WIDTH_20_40MHZ;
+            pStaDs->htSupportedChannelWidthSet = eHT_CHANNEL_WIDTH_20MHZ;
+            limLog(pMac, LOG1,
+                   FL("vhtSupportedChannelWidthSet = %hu,"
+                      " htSupportedChannelWidthSet %hu"),
+                   pStaDs->htSupportedChannelWidthSet,
+                   pStaDs->htSupportedChannelWidthSet);
+        }
+        else
+        {
+            pStaDs->vhtSupportedChannelWidthSet =  WNI_CFG_VHT_CHANNEL_WIDTH_80MHZ;
+            pStaDs->htSupportedChannelWidthSet = eHT_CHANNEL_WIDTH_40MHZ ;
+        }
+
         pStaDs->vhtLdpcCapable = pVhtCaps->ldpcCodingCap;
         pStaDs->vhtBeamFormerCapable = 0;
         pMac->lim.gLimTdlsLinkMode = TDLS_LINK_MODE_AC;
@@ -2415,21 +2383,22 @@ static void limTdlsUpdateHashNodeInfo(tpAniSirGlobal pMac, tDphHashNode *pStaDs,
         pStaDs->vhtSupportedChannelWidthSet = WNI_CFG_VHT_CHANNEL_WIDTH_20_40MHZ;
     }
 #endif
-    /*
-     * Calculate the Secondary Channel Offset if our own channel bonding
-     * state is enabled
-     */
-    if (psessionEntry->htSupportedChannelWidthSet) {
-        cbMode = limSelectCBMode(pStaDs, psessionEntry,
-                                 psessionEntry->currentOperChannel,
-                                 pStaDs->vhtSupportedChannelWidthSet);
+    /*Calculate the Secondary Coannel Offset */
+    cbMode = limSelectCBMode(pStaDs, psessionEntry,
+                             psessionEntry->currentOperChannel,
+                             pStaDs->vhtSupportedChannelWidthSet);
 
-        pStaDs->htSecondaryChannelOffset = cbMode;
+    pStaDs->htSecondaryChannelOffset = cbMode;
+
 #ifdef WLAN_FEATURE_11AC
-        if ( pStaDs->mlmStaContext.vhtCapability )
-            pStaDs->htSecondaryChannelOffset = limGetHTCBState(cbMode);
-#endif
+    if ( pStaDs->mlmStaContext.vhtCapability )
+    {
+        pStaDs->htSecondaryChannelOffset = limGetHTCBState(cbMode);
     }
+#endif
+
+    pSessStaDs = dphLookupHashEntry(pMac, psessionEntry->bssId, &aid,
+                                          &psessionEntry->dph.dphHashTable) ;
 
     /* Lets enable QOS parameter */
     pStaDs->qosMode    = (pTdlsAddStaReq->capability & CAPABILITIES_QOS_OFFSET)
@@ -2650,9 +2619,6 @@ void PopulateDot11fTdlsOffchannelParams(tpAniSirGlobal pMac,
     tANI_U8    chanOffset;
     tANI_U8    op_class;
     tANI_U8    numClasses;
-    uint32_t   band;
-    uint8_t    nss_2g;
-    uint8_t    nss_5g;
     tANI_U8    classes[SIR_MAC_MAX_SUPP_OPER_CLASSES];
     if (wlan_cfgGetStr(pMac, WNI_CFG_VALID_CHANNEL_LIST,
                           validChan, &numChans) != eSIR_SUCCESS)
@@ -2665,32 +2631,15 @@ void PopulateDot11fTdlsOffchannelParams(tpAniSirGlobal pMac,
          return;
     }
 
-    if (IS_5G_CH(psessionEntry->currentOperChannel))
-        band = eCSR_BAND_5G;
-    else
-        band = eCSR_BAND_24;
-
-    nss_5g = VOS_MIN(pMac->vdev_type_nss_5g.tdls, pMac->user_configured_nss);
-    nss_2g = VOS_MIN(pMac->vdev_type_nss_2g.tdls, pMac->user_configured_nss);
-
-    /* validating the channel list for DFS and 2G channels */
-    for (i = 0U; i < numChans; i++) {
-        if ((band == eCSR_BAND_5G) && (NSS_2x2_MODE == nss_5g) &&
-            (NSS_1x1_MODE == nss_2g) &&
-            (true == vos_nv_skip_dsrc_dfs_2g(validChan[i],
-             NV_CHANNEL_SKIP_2G))) {
-                limLog(pMac, LOG1,
-                       FL("skipping channel %d, nss_5g: %d, nss_2g: %d"),
-                       validChan[i], nss_5g, nss_2g);
-                continue;
-        } else {
-            if (true == vos_nv_skip_dsrc_dfs_2g(validChan[i],
-                NV_CHANNEL_SKIP_DSRC)) {
-                limLog(pMac, LOG1,
-                       FL("skipping channel %d from the valid channel list"),
-                       validChan[i]);
-                continue;
-            }
+    /* validating the channel list for DFS channels */
+    for (i = 0U; i < numChans; i++)
+    {
+        if (NV_CHANNEL_DFS == vos_nv_getChannelEnabledState(validChan[i]))
+        {
+            limLog(pMac, LOG1,
+                FL("skipping DFS channel %d from the valid channel list"),
+                validChan[i]);
+            continue;
         }
 
         if (valid_count >=
@@ -2817,7 +2766,8 @@ void PopulateDot11fTdlsExtCapability(tpAniSirGlobal pMac,
     p_ext_cap->TDLSProhibited = TDLS_PROHIBITED ;
 
     extCapability->present = 1 ;
-    extCapability->num_bytes = lim_compute_ext_cap_ie_length(extCapability);
+    /* For STA cases we alwasy support 11mc - Allow MAX length */
+    extCapability->num_bytes = DOT11F_IE_EXTCAP_MAX_LEN;
 
     return ;
 }
@@ -2866,9 +2816,7 @@ tSirRetStatus limProcessSmeTdlsMgmtSendReq(tpAniSirGlobal pMac,
                            psessionEntry->limSmeState);
         goto lim_tdls_send_mgmt_error;
     }
-    vos_tdls_tx_rx_mgmt_event(SIR_MAC_ACTION_TDLS,
-              SIR_MAC_ACTION_TX, SIR_MAC_MGMT_ACTION,
-              pSendMgmtReq->reqType, pSendMgmtReq->peerMac);
+
     switch( pSendMgmtReq->reqType )
     {
         case SIR_MAC_TDLS_DIS_REQ:
@@ -2970,14 +2918,10 @@ void limSendSmeTdlsLinkEstablishReqRsp(tpAniSirGlobal pMac,
         limLog(pMac, LOGE, FL("Failed to allocate memory"));
         return ;
     }
-
-    vos_mem_zero(pTdlsLinkEstablishReqRsp, sizeof(*pTdlsLinkEstablishReqRsp));
-
     pTdlsLinkEstablishReqRsp->statusCode = status ;
-    if (pStaDs && peerMac)
+    if ( peerMac )
     {
         vos_mem_copy(pTdlsLinkEstablishReqRsp->peerMac, peerMac, sizeof(tSirMacAddr));
-        pTdlsLinkEstablishReqRsp->sta_idx = pStaDs->staIndex;
     }
     pTdlsLinkEstablishReqRsp->sessionId = sessionId;
     mmhMsg.type = eWNI_SME_TDLS_LINK_ESTABLISH_RSP ;
@@ -3328,108 +3272,46 @@ lim_tdls_link_establish_error:
     return eSIR_SUCCESS;
 }
 
-/**
- * lim_check_aid_and_delete_peer - Funtion to check aid and delete peer
- * @p_mac: pointer to mac context
- * @session_entry: pointer to PE session
- *
- * Function verifies aid and delete's peer with that aid from hash table
- *
- * return: none
- */
-static void lim_check_aid_and_delete_peer(tpAniSirGlobal p_mac,
-			tpPESession session_entry)
-{
-	tpDphHashNode sta_ds = NULL ;
-	int i, aid;
-
-	/*
-	 * Check all the set bit in peerAIDBitmap and delete the
-	 * peer (with that aid) entry from the hash table and add
-	 * the aid in free pool
-	 */
-	for (i = 0; i < sizeof(session_entry->peerAIDBitmap)/sizeof(uint32_t);
-				i++) {
-		for (aid = 0; aid < (sizeof(uint32_t) << 3); aid++) {
-			if (!CHECK_BIT(session_entry->peerAIDBitmap[i], aid))
-				continue;
-
-			sta_ds = dphGetHashEntry(p_mac,
-				    (aid + i*(sizeof(uint32_t) << 3)),
-				    &session_entry->dph.dphHashTable);
-
-			if (NULL == sta_ds)
-				goto skip;
-
-			limLog(p_mac, LOG1,
-			    FL("Deleting "MAC_ADDRESS_STR),
-			    MAC_ADDR_ARRAY(sta_ds->staAddr));
-			limSendDeauthMgmtFrame(p_mac,
-			    eSIR_MAC_DEAUTH_LEAVING_BSS_REASON,
-			    sta_ds->staAddr, session_entry,
-			    FALSE);
-			limTdlsDelSta(p_mac, sta_ds->staAddr,
-				session_entry);
-			dphDeleteHashEntry(p_mac,
-			    sta_ds->staAddr,
-			    sta_ds->assocId,
-			    &session_entry->dph.dphHashTable);
-skip:
-			limReleasePeerIdx(p_mac,
-				(aid + i*(sizeof(uint32_t) << 3)),
-				session_entry);
-			CLEAR_BIT(session_entry->peerAIDBitmap[i], aid);
-		}
-	}
-}
 
 /* Delete all the TDLS peer connected before leaving the BSS */
 tSirRetStatus limDeleteTDLSPeers(tpAniSirGlobal pMac, tpPESession psessionEntry)
 {
+    tpDphHashNode pStaDs = NULL ;
+    int i, aid;
+
     if (NULL == psessionEntry)
     {
         limLog(pMac, LOGE, FL("NULL psessionEntry"));
         return eSIR_FAILURE;
     }
 
-    lim_check_aid_and_delete_peer(pMac, psessionEntry);
+    /* Check all the set bit in peerAIDBitmap and delete the peer (with that aid) entry
+       from the hash table and add the aid in free pool */
+    for (i = 0; i < sizeof(psessionEntry->peerAIDBitmap)/sizeof(tANI_U32); i++)
+    {
+        for (aid = 0; aid < (sizeof(tANI_U32) << 3); aid++)
+        {
+            if (CHECK_BIT(psessionEntry->peerAIDBitmap[i], aid))
+            {
+                pStaDs = dphGetHashEntry(pMac, (aid + i*(sizeof(tANI_U32) << 3)), &psessionEntry->dph.dphHashTable);
 
+                if (NULL != pStaDs)
+                {
+                    limLog(pMac, LOGE, FL("Deleting "MAC_ADDRESS_STR),
+                                       MAC_ADDR_ARRAY(pStaDs->staAddr));
+
+                    limSendDeauthMgmtFrame(pMac, eSIR_MAC_DEAUTH_LEAVING_BSS_REASON,
+                                           pStaDs->staAddr, psessionEntry, FALSE);
+                    dphDeleteHashEntry(pMac, pStaDs->staAddr, pStaDs->assocId, &psessionEntry->dph.dphHashTable);
+                }
+                limReleasePeerIdx(pMac, (aid + i*(sizeof(tANI_U32) << 3)), psessionEntry) ;
+                CLEAR_BIT(psessionEntry->peerAIDBitmap[i], aid);
+            }
+        }
+    }
     limSendSmeTDLSDeleteAllPeerInd(pMac, psessionEntry);
 
     return eSIR_SUCCESS;
-}
-
-/**
- * lim_process_sme_del_all_tdls_peers: process delete tdls peers
- * @p_mac: pointer to mac context
- * @msg_buf: message buffer
- *
- * Function processes request to delete tdls peers
- *
- * Return: Sucess: eSIR_SUCCESS Failure: Error value
- */
-tSirRetStatus lim_process_sme_del_all_tdls_peers(tpAniSirGlobal p_mac,
-				uint32_t *msg_buf)
-{
-	struct sir_del_all_tdls_peers *msg;
-	tpPESession session_entry;
-	uint8_t session_id;
-
-	msg = (struct sir_del_all_tdls_peers *)msg_buf;
-	if (msg == NULL) {
-		limLog(p_mac, LOGE, FL("NULL msg"));
-		return eSIR_FAILURE;
-	}
-
-	session_entry = peFindSessionByBssid(p_mac, msg->bssid, &session_id);
-	if (NULL == session_entry) {
-		limLog(p_mac, LOGE, FL("NULL psessionEntry"));
-		return eSIR_FAILURE;
-	}
-
-	lim_check_aid_and_delete_peer(p_mac, session_entry);
-
-	return eSIR_SUCCESS;
 }
 
 #endif

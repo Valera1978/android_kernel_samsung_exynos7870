@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012-2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2012-2015 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -95,6 +95,12 @@ typedef enum
 
 typedef enum
 {
+   WDA_DISABLE_BA,
+   WDA_ENABLE_BA
+}WDA_BaEnableFlags;
+
+typedef enum
+{
    WDA_INVALID_STA_INDEX,
    WDA_VALID_STA_INDEX
 }WDA_ValidStaIndex;
@@ -129,8 +135,6 @@ typedef enum
   WDA_TDLS_PEER_STATE_PEERING,
   WDA_TDLS_PEER_STATE_CONNECTED,
   WDA_TDLS_PEER_STATE_TEARDOWN,
-  WDA_TDLS_PEER_ADD_MAC_ADDR,
-  WDA_TDLS_PEER_REMOVE_MAC_ADDR,
 } WDA_TdlsPeerState;
 /* WMI_TDLS_SET_OFFCHAN_MODE_CMDID */
 typedef enum
@@ -300,8 +304,6 @@ typedef void (*pWDATxRxCompFunc)( v_PVOID_t pContext, void *pData,
 //parameter 2 - txComplete status : 1- success, 0 - failure.
 typedef eHalStatus (*pWDAAckFnTxComp)(tpAniSirGlobal, tANI_U32);
 
-typedef void (*WDA_txFailIndCallback)(tANI_U8 *, tANI_U8);
-
 /* generic callback for updating parameters from target to UMAC */
 typedef void (*wda_tgt_cfg_cb) (void *context, void *param);
 
@@ -311,8 +313,6 @@ typedef void (*wda_tgt_cfg_cb) (void *context, void *param);
  * found on the current operating channel
  */
 typedef bool (*wda_dfs_radar_indication_cb) (void *context, void *param);
-
-typedef void (*wda_dfs_block_tx_cb) (void *context, bool cac_block_tx);
 
 typedef struct
 {
@@ -401,8 +401,7 @@ typedef struct
    /* Event to wait for WDA stop on FTM mode */
    vos_event_t          ftmStopDoneEvent;
 
-   WDA_txFailIndCallback txFailIndCallback;
-} tWDA_CbContext ;
+} tWDA_CbContext ; 
 
 typedef struct
 {
@@ -445,7 +444,6 @@ VOS_STATUS WDA_TxPacket(void *pWDA,
 VOS_STATUS WDA_open(v_PVOID_t pVosContext, v_PVOID_t pOSContext,
                           wda_tgt_cfg_cb pTgtUpdCB,
                           wda_dfs_radar_indication_cb radar_ind_cb,
-                          wda_dfs_block_tx_cb dfs_block_tx_cb,
                           tMacOpenParameters *pMacParams ) ;
 
 #define WDA_start wma_start
@@ -577,6 +575,7 @@ tSirRetStatus uMacPostCtrlMsg(void* pSirGlobal, tSirMbMsg* pMb);
 #define WDA_HDD_ADDBA_REQ  SIR_HAL_HDD_ADDBA_REQ
 #define WDA_HDD_ADDBA_RSP  SIR_HAL_HDD_ADDBA_RSP
 #define WDA_DELETEBA_IND   SIR_HAL_DELETEBA_IND
+#define WDA_BA_FAIL_IND    SIR_HAL_BA_FAIL_IND
 #define WDA_TL_FLUSH_AC_REQ SIR_TL_HAL_FLUSH_AC_REQ
 #define WDA_TL_FLUSH_AC_RSP SIR_HAL_TL_FLUSH_AC_RSP
 
@@ -653,11 +652,8 @@ tSirRetStatus uMacPostCtrlMsg(void* pSirGlobal, tSirMbMsg* pMb);
 #define WDA_BMPS_STATUS_IND            SIR_HAL_BMPS_STATUS_IND
 #define WDA_MISSED_BEACON_IND          SIR_HAL_MISSED_BEACON_IND
 
-#define WDA_SMPS_FORCE_MODE_IND        SIR_HAL_SMPS_FORCE_MODE_IND
-
 #define WDA_CFG_RXP_FILTER_REQ         SIR_HAL_CFG_RXP_FILTER_REQ
 #define WDA_CFG_RXP_FILTER_RSP         SIR_HAL_CFG_RXP_FILTER_RSP
-#define WDA_SEND_FREQ_RANGE_CONTROL_IND      SIR_HAL_SEND_FREQ_RANGE_CONTROL_IND
 
 #define WDA_SWITCH_CHANNEL_RSP         SIR_HAL_SWITCH_CHANNEL_RSP
 #define WDA_P2P_NOA_ATTR_IND           SIR_HAL_P2P_NOA_ATTR_IND
@@ -673,6 +669,10 @@ tSirRetStatus uMacPostCtrlMsg(void* pSirGlobal, tSirMbMsg* pMb);
 #define WDA_SOFTMAC_BULKREGREAD_RESPONSE      SIR_HAL_SOFTMAC_BULKREGREAD_RESPONSE
 #define WDA_SOFTMAC_HOSTMESG_MSGPROCESSRESULT SIR_HAL_SOFTMAC_HOSTMESG_MSGPROCESSRESULT
 
+#define WDA_ADDBA_REQ                  SIR_HAL_ADDBA_REQ
+#define WDA_ADDBA_RSP                  SIR_HAL_ADDBA_RSP
+#define WDA_DELBA_IND                  SIR_HAL_DELBA_IND
+#define WDA_DEL_BA_IND                 SIR_HAL_DEL_BA_IND
 #define WDA_MIC_FAILURE_IND            SIR_HAL_MIC_FAILURE_IND
 
 //message from sme to initiate delete block ack session.
@@ -794,10 +794,8 @@ tSirRetStatus uMacPostCtrlMsg(void* pSirGlobal, tSirMbMsg* pMb);
 #define WDA_DEL_STA_SELF_REQ           SIR_HAL_DEL_STA_SELF_REQ
 
 #define WDA_SET_P2P_GO_NOA_REQ         SIR_HAL_SET_P2P_GO_NOA_REQ
-#ifdef FEATURE_WLAN_TDLS
 #define WDA_SET_TDLS_LINK_ESTABLISH_REQ SIR_HAL_TDLS_LINK_ESTABLISH_REQ
 #define WDA_SET_TDLS_LINK_ESTABLISH_REQ_RSP SIR_HAL_TDLS_LINK_ESTABLISH_REQ_RSP
-#endif
 
 #define WDA_TX_COMPLETE_TIMEOUT_IND  (WDA_MSG_TYPES_END - 1)
 #define WDA_WLAN_SUSPEND_IND           SIR_HAL_WLAN_SUSPEND_IND
@@ -858,8 +856,6 @@ tSirRetStatus uMacPostCtrlMsg(void* pSirGlobal, tSirMbMsg* pMb);
 #define WDA_DHCP_START_IND              SIR_HAL_DHCP_START_IND
 #define WDA_DHCP_STOP_IND               SIR_HAL_DHCP_STOP_IND
 
-#define WDA_TX_FAIL_MONITOR_IND         SIR_HAL_TX_FAIL_MONITOR_IND
-
 #define WDA_HIDDEN_SSID_VDEV_RESTART    SIR_HAL_HIDE_SSID_VDEV_RESTART
 
 #ifdef WLAN_FEATURE_GTK_OFFLOAD
@@ -888,8 +884,6 @@ tSirRetStatus uMacPostCtrlMsg(void* pSirGlobal, tSirMbMsg* pMb);
 #define WDA_UPDATE_CHAN_LIST_REQ    SIR_HAL_UPDATE_CHAN_LIST_REQ
 #define WDA_UPDATE_CHAN_LIST_RSP    SIR_HAL_UPDATE_CHAN_LIST_RSP
 #define WDA_RX_SCAN_EVENT           SIR_HAL_RX_SCAN_EVENT
-#define WDA_RX_CHN_STATUS_EVENT     SIR_HAL_RX_CHN_STATUS_EVENT
-
 #define WDA_IBSS_PEER_INACTIVITY_IND SIR_HAL_IBSS_PEER_INACTIVITY_IND
 
 #define WDA_CLI_SET_CMD             SIR_HAL_CLI_SET_CMD
@@ -924,19 +918,16 @@ tSirRetStatus uMacPostCtrlMsg(void* pSirGlobal, tSirMbMsg* pMb);
 #define WDA_RATE_UPDATE_IND         SIR_HAL_RATE_UPDATE_IND
 
 #define WDA_INIT_THERMAL_INFO_CMD   SIR_HAL_INIT_THERMAL_INFO_CMD
-#define WDA_INIT_DPD_RECAL_INFO_CMD   SIR_HAL_INIT_DPD_RECAL_INFO_CMD
 #define WDA_SET_THERMAL_LEVEL       SIR_HAL_SET_THERMAL_LEVEL
 
 #define WDA_RMC_ENABLE_IND          SIR_HAL_RMC_ENABLE_IND
 #define WDA_RMC_DISABLE_IND         SIR_HAL_RMC_DISABLE_IND
 #define WDA_RMC_ACTION_PERIOD_IND   SIR_HAL_RMC_ACTION_PERIOD_IND
 
-/* IBSS peer info related message */
 #define WDA_GET_IBSS_PEER_INFO_REQ  SIR_HAL_IBSS_PEER_INFO_REQ
 #define WDA_GET_IBSS_PEER_INFO_RSP  SIR_HAL_IBSS_PEER_INFO_RSP
 
 #define WDA_IBSS_CESIUM_ENABLE_IND  SIR_HAL_IBSS_CESIUM_ENABLE_IND
-
 #define WDA_INIT_BAD_PEER_TX_CTL_INFO_CMD   SIR_HAL_BAD_PEER_TX_CTL_INI_CMD
 
 #ifdef FEATURE_WLAN_TDLS
@@ -961,11 +952,7 @@ tSirRetStatus uMacPostCtrlMsg(void* pSirGlobal, tSirMbMsg* pMb);
 #define WDA_DEAUTH_TX_COMP         SIR_HAL_DEAUTH_TX_COMP
 #define WDA_GET_LINK_SPEED         SIR_HAL_GET_LINK_SPEED
 
-#define WDA_GET_PEER_INFO               SIR_HAL_GET_PEER_INFO
-#define WDA_GET_PEER_INFO_EXT      SIR_HAL_GET_PEER_INFO_EXT
-#define WDA_GET_PEER_INFO_EXT_IND  SIR_HAL_GET_PEER_INFO_EXT_IND
-
-#define WDA_GET_ISOLATION          SIR_HAL_GET_ISOLATION
+#define WDA_GET_RSSI               SIR_HAL_GET_RSSI
 
 #define WDA_MODEM_POWER_STATE_IND SIR_HAL_MODEM_POWER_STATE_IND
 
@@ -1007,7 +994,6 @@ tSirRetStatus uMacPostCtrlMsg(void* pSirGlobal, tSirMbMsg* pMb);
 #define WDA_LINK_LAYER_STATS_SET_REQ          SIR_HAL_LL_STATS_SET_REQ
 #define WDA_LINK_LAYER_STATS_GET_REQ          SIR_HAL_LL_STATS_GET_REQ
 #define WDA_LINK_LAYER_STATS_RESULTS_RSP      SIR_HAL_LL_STATS_RESULTS_RSP
-#define WDA_LINK_LAYER_STATS_SET_THRESHOLD    SIR_HAL_LL_STATS_EXT_SET_THRESHOLD
 #endif /* WLAN_FEATURE_LINK_LAYER_STATS */
 
 #define WDA_LINK_STATUS_GET_REQ SIR_HAL_LINK_STATUS_GET_REQ
@@ -1048,7 +1034,6 @@ tSirRetStatus uMacPostCtrlMsg(void* pSirGlobal, tSirMbMsg* pMb);
 #define WDA_APFIND_SET_CMD                    SIR_HAL_APFIND_SET_CMD
 #endif /* WLAN_FEATURE_APFIND */
 
-#define WDA_DSRC_RADIO_CHAN_STATS_REQ         SIR_HAL_DSRC_RADIO_CHAN_STATS_REQ
 #define WDA_OCB_SET_CONFIG_CMD                SIR_HAL_OCB_SET_CONFIG_CMD
 #define WDA_OCB_SET_UTC_TIME_CMD              SIR_HAL_OCB_SET_UTC_TIME_CMD
 #define WDA_OCB_START_TIMING_ADVERT_CMD       SIR_HAL_OCB_START_TIMING_ADVERT_CMD
@@ -1057,8 +1042,6 @@ tSirRetStatus uMacPostCtrlMsg(void* pSirGlobal, tSirMbMsg* pMb);
 #define WDA_DCC_GET_STATS_CMD                 SIR_HAL_DCC_GET_STATS_CMD
 #define WDA_DCC_CLEAR_STATS_CMD               SIR_HAL_DCC_CLEAR_STATS_CMD
 #define WDA_DCC_UPDATE_NDL_CMD                SIR_HAL_DCC_UPDATE_NDL_CMD
-
-#define WDA_BTC_BT_WLAN_INTERVAL_CMD          SIR_BTC_BT_WLAN_INTERVAL_CMD
 
 #ifdef FEATURE_RUNTIME_PM
 #define WDA_RUNTIME_PM_SUSPEND_IND            SIR_HAL_RUNTIME_PM_SUSPEND_IND
@@ -1069,6 +1052,7 @@ tSirRetStatus uMacPostCtrlMsg(void* pSirGlobal, tSirMbMsg* pMb);
 #define WDA_UPDATE_Q2Q_IE_IND                 SIR_HAL_UPDATE_Q2Q_IE_IND
 #endif /* FEATURE_AP_MCC_CH_AVOIDANCE */
 
+#define WDA_FW_MEM_DUMP_REQ                   SIR_HAL_FW_MEM_DUMP_REQ
 #define WDA_TSF_GPIO_PIN                      SIR_HAL_TSF_GPIO_PIN_REQ
 #define WDA_SET_RSSI_MONITOR_REQ              SIR_HAL_SET_RSSI_MONITOR_REQ
 
@@ -1076,51 +1060,7 @@ tSirRetStatus uMacPostCtrlMsg(void* pSirGlobal, tSirMbMsg* pMb);
 
 #define WDA_SET_UDP_RESP_OFFLOAD              SIR_HAL_SET_UDP_RESP_OFFLOAD
 
-#define WDA_SET_WOW_PULSE_CMD                 SIR_HAL_SET_WOW_PULSE_CMD
 
-#define WDA_SET_WAKEUP_GPIO_CMD               SIR_HAL_SET_WAKEUP_GPIO_CMD
-
-#define WDA_UPDATE_WEP_DEFAULT_KEY            SIR_HAL_UPDATE_WEP_DEFAULT_KEY
-
-#define WDA_SET_CTS2SELF_FOR_STA              SIR_HAL_SET_CTS2SELF_FOR_STA
-
-#define WDA_SET_EGAP_CONF_PARAMS              SIR_HAL_SET_EGAP_CONF_PARAMS
-
-#define WDA_BPF_GET_CAPABILITIES_REQ          SIR_HAL_BPF_GET_CAPABILITIES_REQ
-#define WDA_BPF_SET_INSTRUCTIONS_REQ          SIR_HAL_BPF_SET_INSTRUCTIONS_REQ
-
-#define WDA_MIB_STATS_REQ                     SIR_HAL_MIB_STATS_REQ
-#define WDA_SET_MIB_STATS_ENABLE              SIR_HAL_SET_MIB_STATS_ENABLE
-#define WDA_SET_MIB_STATS_DISABLE             SIR_HAL_SET_MIB_STATS_DISABLE
-#define WDA_ADD_BCN_FILTER_CMDID              SIR_HAL_ADD_BCN_FILTER_CMDID
-#define WDA_REMOVE_BCN_FILTER_CMDID           SIR_HAL_REMOVE_BCN_FILTER_CMDID
-
-#define WDA_UPDATE_TX_RATE                    SIR_HAL_UPDATE_TX_RATE
-#define WDA_UPDATE_TX_FAIL_CNT_TH             SIR_HAL_UPDATE_TX_FAIL_CNT_TH
-#define WDA_UPDATE_SHORT_RETRY_LIMIT_CNT      SIR_HAL_SHORT_RETRY_LIMIT_CNT
-#define WDA_UPDATE_LONG_RETRY_LIMIT_CNT       SIR_HAL_LONG_RETRY_LIMIT_CNT
-
-#define WDA_PEER_FLUSH_PENDING                SIR_HAL_PEER_FLUSH_PENDING
-
-#define WDA_UPDATE_STA_INACTIVITY_TIMEOUT     SIR_HAL_STA_INACTIVITY_TIMEOUT
-#define WDA_ACTION_FRAME_RANDOM_MAC           SIR_HAL_ACTION_FRAME_RANDOM_MAC
-
-#define WDA_SET_AC_TXQ_OPTIMIZE               SIR_HAL_SET_AC_TXQ_OPTIMIZE
-#define WDA_MNT_FILTER_TYPE_CMD               SIR_HAL_MNT_FILTER_TYPE_CMD
-#define WDA_THERM_THROT_SET_CONF_CMD          SIR_HAL_THERM_THROT_SET_CONF_CMD
-#define WDA_THERMAL_MGMT_CMD                  SIR_HAL_THERM_MGMT_CMD
-
-#ifdef WLAN_FEATURE_MOTION_DETECTION
-#define WDA_SET_MOTION_DET_CONFIG             SIR_HAL_SET_MOTION_DET_CONFIG
-#define WDA_SET_MOTION_DET_ENABLE             SIR_HAL_SET_MOTION_DET_ENABLE
-#define WDA_SET_MOTION_DET_BASE_LINE_CONFIG   SIR_HAL_SET_MOTION_DET_BASE_LINE_CONFIG
-#define WDA_SET_MOTION_DET_BASE_LINE_ENABLE   SIR_HAL_SET_MOTION_DET_BASE_LINE_ENABLE
-#endif
-
-#define WDA_PEER_CFR_CAPTURE_CONF_CMD         SIR_HAL_PEER_CFR_CAPTURE_CONF_CMD
-#define WDA_PERIODIC_CFR_ENABLE_CMD           SIR_HAL_PERIODIC_CFR_ENABLE_CMD
-
-#define WDA_SET_HPCS_PULSE_PARAMS             SIR_HAL_SET_HPCS_PULSE_PARMAS
 
 tSirRetStatus wdaPostCtrlMsg(tpAniSirGlobal pMac, tSirMsgQ *pMsg);
 

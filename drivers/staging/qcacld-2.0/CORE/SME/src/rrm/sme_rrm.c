@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011-2014, 2016, 2018 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2014 The Linux Foundation. All rights reserved.
  *
  * Previously licensed under the ISC license by Qualcomm Atheros, Inc.
  *
@@ -45,7 +45,6 @@
 #include "sme_Api.h"
 #include "smsDebug.h"
 #include "cfgApi.h"
-#include "regdomain_common.h"
 
 #ifdef FEATURE_WLAN_DIAG_SUPPORT
 #include "vos_diag_core_event.h"
@@ -181,7 +180,7 @@ static eHalStatus sme_RrmSendBeaconReportXmitInd( tpAniSirGlobal pMac,
 {
    tpSirBssDescription pBssDesc = NULL;
    tpSirBeaconReportXmitInd pBeaconRep;
-   tANI_U16 length, ie_len, tot_len;
+   tANI_U16 length, ie_len;
    tANI_U8 bssCounter=0, msgCounter=0;
    tCsrScanResultInfo *pCurResult=NULL;
    eHalStatus status = eHAL_STATUS_FAILURE;
@@ -228,13 +227,10 @@ static eHalStatus sme_RrmSendBeaconReportXmitInd( tpAniSirGlobal pMac,
            if(pBssDesc != NULL)
            {
                ie_len = GET_IE_LEN_IN_BSS( pBssDesc->length );
-               tot_len = ie_len+sizeof(tSirBssDescription);
-               pBeaconRep->pBssDescription[msgCounter] =
-                                      vos_mem_malloc(tot_len);
+               pBeaconRep->pBssDescription[msgCounter] = vos_mem_malloc (
+                                            ie_len+sizeof(tSirBssDescription));
                if (NULL == pBeaconRep->pBssDescription[msgCounter])
                    break;
-               vos_mem_zero(pBeaconRep->pBssDescription[msgCounter],
-                                                             tot_len);
                vos_mem_copy( pBeaconRep->pBssDescription[msgCounter],
                              pBssDesc,
                              sizeof(tSirBssDescription) );
@@ -473,8 +469,6 @@ static eHalStatus sme_RrmSendScanResult( tpAniSirGlobal pMac,
    tANI_U8 counter=0;
    tpRrmSMEContext pSmeRrmContext = &pMac->rrm.rrmSmeContext;
    tANI_U32 sessionId;
-   tCsrRoamInfo *roam_info;
-   tSirScanType scan_type;
 
 #if defined WLAN_VOWIFI_DEBUG
    smsLog( pMac, LOGE, "Send scan result to PE ");
@@ -537,7 +531,6 @@ static eHalStatus sme_RrmSendScanResult( tpAniSirGlobal pMac,
 #endif
    }
 
-   smsLog(pMac, LOG1, FL("RRM Measurement Done %d"), measurementDone);
    if (NULL == pResult)
    {
       /*
@@ -592,84 +585,40 @@ static eHalStatus sme_RrmSendScanResult( tpAniSirGlobal pMac,
 #endif /*FEATURE_WLAN_ESE_UPLOAD*/
            status = sme_RrmSendBeaconReportXmitInd( pMac, NULL, measurementDone, 0 );
    }
-   if (eRRM_MSG_SOURCE_ESE_UPLOAD == pSmeRrmContext->msgSource ||
-       eRRM_MSG_SOURCE_LEGACY_ESE == pSmeRrmContext->msgSource)
-       scan_type = pSmeRrmContext->measMode[pSmeRrmContext->currentIndex];
-   else
-       scan_type = pSmeRrmContext->measMode[0];
 
    counter=0;
    while (pScanResult)
    {
-      /*
-       * In passive scan, sta listens beacon. Connected AP beacon
-       * is offloaded to firmware. Firmware will discard
-       * connected AP beacon except that special IE exists.
-       * Connected AP beacon will not be sent to host. Hence, timer
-       * of connected AP in scan results is not updated and can
-       * not meet "pScanResult->timer >= RRM_scan_timer".
-       */
-      tCsrRoamSession *session;
-      uint8_t is_conn_bss_found = false;
-
-      if (scan_type == eSIR_PASSIVE_SCAN) {
-          session = CSR_GET_SESSION(pMac, sessionId);
-         if (csrIsConnStateConnectedInfra(pMac, sessionId) &&
-	     (session) && (NULL != session->pConnectBssDesc) &&
-             (csrIsDuplicateBssDescription(pMac, &pScanResult->BssDescriptor,
-             session->pConnectBssDesc, NULL, FALSE))) {
-             is_conn_bss_found = true;
-             smsLog(pMac, LOG1, "Connected BSS in scan results");
-         }
-      }
       pNextResult = sme_ScanResultGetNext(pMac, pResult);
-      smsLog(pMac, LOG1, "Scan res timer:%lu, rrm scan timer:%lu",
-             pScanResult->timer, RRM_scan_timer);
-      if ((pScanResult->timer >= RRM_scan_timer) || (is_conn_bss_found == true))
+      if(pScanResult->timer >= RRM_scan_timer)
       {
-          roam_info = vos_mem_malloc(sizeof(*roam_info));
-          if (NULL == roam_info) {
-              smsLog( pMac, LOGP, FL("vos_mem_malloc failed:") );
-              status =  eHAL_STATUS_FAILED_ALLOC;
-              goto rrm_send_scan_results_done;
-          }
-          vos_mem_zero(roam_info, sizeof(*roam_info));
-          roam_info->pBssDesc = &pScanResult->BssDescriptor;
-          csrRoamCallCallback(pMac, sessionId, roam_info, 0,
-                           eCSR_ROAM_UPDATE_SCAN_RESULT, eCSR_ROAM_RESULT_NONE);
-          vos_mem_free(roam_info);
           pScanResultsArr[counter++] = pScanResult;
       }
       pScanResult = pNextResult; //sme_ScanResultGetNext(hHal, pResult);
       if (counter >= SIR_BCN_REPORT_MAX_BSS_DESC)
          break;
-   }
+      }
 
-   smsLog(pMac, LOG1, " Number of BSS Desc with RRM Scan %d ", counter);
-   /*
-    * The beacon report should be sent whether the counter is zero or non-zero.
-    * There might be a few scan results in the cache but not actually are a
-    * result of this scan. During that scenario, the counter will be zero.
-    * The report should be sent and LIM will further cleanup the RRM to
-    * accept the further incoming requests
-    * In case the counter is Zero, the pScanResultsArr will be NULL.
-    * The next level routine does a check for the measurementDone to determine
-    * whether to send a report or not.
-    */
-   if (counter || measurementDone) {
+   if (counter)
+   {
+          smsLog(pMac, LOG1, " Number of BSS Desc with RRM Scan %d ", counter);
 #if defined(FEATURE_WLAN_ESE_UPLOAD)
-        if (eRRM_MSG_SOURCE_ESE_UPLOAD == pSmeRrmContext->msgSource)
-            status = sme_EseSendBeaconReqScanResults(pMac, sessionId,
-                                    chanList[0], pScanResultsArr,
-                                    measurementDone, counter);
-   else
-#endif
-            status = sme_RrmSendBeaconReportXmitInd(pMac,
-                                    pScanResultsArr,
-                                    measurementDone, counter);
+         if (eRRM_MSG_SOURCE_ESE_UPLOAD == pSmeRrmContext->msgSource)
+         {
+             status = sme_EseSendBeaconReqScanResults(pMac,
+                                                sessionId,
+                                                chanList[0],
+                                                pScanResultsArr,
+                                                measurementDone,
+                                                counter);
+         }
+         else
+#endif /*FEATURE_WLAN_ESE_UPLOAD*/
+             status = sme_RrmSendBeaconReportXmitInd( pMac,
+                                                pScanResultsArr,
+                                                measurementDone,
+                                                counter);
    }
-
-rrm_send_scan_results_done:
    sme_ScanResultPurge(pMac, pResult);
 
    return status;
@@ -756,6 +705,9 @@ static eHalStatus sme_RrmScanRequestCallback(tHalHandle halHandle,
   --------------------------------------------------------------------------*/
 eHalStatus sme_RrmIssueScanReq( tpAniSirGlobal pMac )
 {
+   //Issue scan request.
+   tCsrScanRequest scanRequest;
+   v_U32_t scanId = 0;
    eHalStatus status = eHAL_STATUS_SUCCESS;
    tpRrmSMEContext pSmeRrmContext = &pMac->rrm.rrmSmeContext;
    tANI_U32 sessionId;
@@ -769,12 +721,7 @@ eHalStatus sme_RrmIssueScanReq( tpAniSirGlobal pMac )
    }
 
    if ((pSmeRrmContext->currentIndex) >= pSmeRrmContext->channelList.numOfChannels)
-   {
-       sme_RrmSendBeaconReportXmitInd(pMac, NULL, true, 0);
-       vos_mem_free( pSmeRrmContext->channelList.ChannelList );
-       smsLog( pMac, LOGE, "%s : done with the complete ch lt. finish and fee now", __func__);
        return status;
-   }
 
    if( eRRM_MSG_SOURCE_ESE_UPLOAD == pSmeRrmContext->msgSource ||
        eRRM_MSG_SOURCE_LEGACY_ESE == pSmeRrmContext->msgSource )
@@ -784,10 +731,6 @@ eHalStatus sme_RrmIssueScanReq( tpAniSirGlobal pMac )
 
    if ((eSIR_ACTIVE_SCAN == scanType) || (eSIR_PASSIVE_SCAN == scanType))
    {
-       tCsrScanRequest scanRequest;
-       v_U32_t scanId = 0;
-       v_TIME_t current_time;
-
 #if defined WLAN_VOWIFI_DEBUG
    smsLog( pMac, LOGE, "Issue scan request " );
 #endif
@@ -827,25 +770,6 @@ eHalStatus sme_RrmIssueScanReq( tpAniSirGlobal pMac )
 
        smsLog( pMac, LOG1, "Scan Type(%d) Max Dwell Time(%d)", scanRequest.scanType,
                   scanRequest.maxChnTime );
-      /**
-       * For RRM scans timing is very important especially when the request
-       * is for limited channels. There is no need for firmware to rest for
-       * about 100-200 ms on the home channel. Instead, it can start the
-       * scan right away which will make the host to respond with the beacon
-       * report as quickly as possible. Ensure that the scan requests are
-       * not back to back and hence there is a check to see if the requests
-       * are atleast 1 second apart.
-       */
-       current_time = vos_timer_get_system_time();
-       smsLog(pMac, LOG1, "prev scan triggered before %ld ms, totalchannels %d",
-              current_time - RRM_scan_timer,
-              pSmeRrmContext->channelList.numOfChannels);
-       if ((abs(current_time - RRM_scan_timer) > 1000) &&
-               (pSmeRrmContext->channelList.numOfChannels == 1)) {
-            scanRequest.restTime = 1;
-            scanRequest.min_rest_time = 1;
-            scanRequest.idle_time = 1;
-       }
 
        RRM_scan_timer = vos_timer_get_system_time();
 
@@ -908,7 +832,6 @@ eHalStatus sme_RrmIssueScanReq( tpAniSirGlobal pMac )
                 /* If this is not done, pCurrentReq pointer will not be freed and
                    PE will not handle subsequent Beacon requests */
         sme_RrmSendBeaconReportXmitInd(pMac, NULL, true, 0);
-        vos_mem_free( pSmeRrmContext->channelList.ChannelList );
    }
 
    return status;
@@ -931,7 +854,7 @@ eHalStatus sme_RrmProcessBeaconReportReqInd(tpAniSirGlobal pMac, void *pMsgBuf)
 {
    tpSirBeaconReportReqInd pBeaconReq = (tpSirBeaconReportReqInd) pMsgBuf;
    tpRrmSMEContext pSmeRrmContext = &pMac->rrm.rrmSmeContext;
-   tANI_U32 len = 0, i = 0, temp = 0;
+   tANI_U32 len = 0, i = 0;
    eHalStatus status = eHAL_STATUS_SUCCESS;
 
 #if defined WLAN_VOWIFI_DEBUG
@@ -954,21 +877,6 @@ eHalStatus sme_RrmProcessBeaconReportReqInd(tpAniSirGlobal pMac, void *pMsgBuf)
       smsLog( pMac, LOGE, FL("Allocated memory for ChannelList") );
 #endif
       csrGetCfgValidChannels( pMac, pSmeRrmContext->channelList.ChannelList, &len );
-      /* Listing all the channels in the requested RC */
-      regdm_get_channel_from_opclass(pMac->scan.countryCodeCurrent,
-                                     pBeaconReq->channelInfo.regulatoryClass);
-      for (i = 0 ; i <len; i++)
-      {
-          if (regdm_get_opclass_from_channel(pMac->scan.countryCodeCurrent,
-              pSmeRrmContext->channelList.ChannelList[i], BWALL) ==
-              pBeaconReq->channelInfo.regulatoryClass)
-          {
-              pSmeRrmContext->channelList.ChannelList[temp] =
-                                                 pSmeRrmContext->channelList.ChannelList[i];
-              temp++;
-          }
-      }
-      len = temp;
       pSmeRrmContext->channelList.numOfChannels = (tANI_U8)len;
 #if defined WLAN_VOWIFI_DEBUG
       smsLog( pMac, LOGE, "channel == 0 performing on all channels");
@@ -1277,11 +1185,11 @@ eHalStatus sme_RrmProcessNeighborReport(tpAniSirGlobal pMac, void *pMsgBuf)
    tpRrmNeighborReportDesc  pNeighborReportDesc;
    tANI_U8 i = 0;
    VOS_STATUS vosStatus = VOS_STATUS_SUCCESS;
-   tANI_U32 sessionId;
+   tANI_U8 sessionId;
 
    /* Get the session id */
    status = csrRoamGetSessionIdFromBSSID(pMac, (tCsrBssid *)pNeighborRpt->bssId,
-                                         &sessionId);
+                                        (tANI_U32*) &sessionId);
    if (HAL_STATUS_SUCCESS(status)) {
 #ifdef FEATURE_WLAN_ESE
        /* Clear the cache for ESE. */
