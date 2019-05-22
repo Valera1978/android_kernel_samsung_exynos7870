@@ -442,7 +442,6 @@ CONFIG_CMDLINE=""
 CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE=y
 CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE_NAMES="exynos7870-gtaxllte_eur_open_00 exynos7870-gtaxllte_eur_open_01 exynos7870-gtaxllte_eur_open_04 exynos7870-gtaxllte_eur_open_05"
 
-
 #
 # Userspace binary formats
 #
@@ -1587,9 +1586,10 @@ CONFIG_BCMDHD_NVRAM_PATH="/etc/wifi/nvram_net.txt"
 # CONFIG_WL_TI is not set
 # CONFIG_MWIFIEX is not set
 
+#
 # Qualcomm Atheros CLD WLAN module
 #
-CONFIG_QCA_CLD_WLAN=y
+CONFIG_QCA_CLD_WLAN=m
 CONFIG_QCACLD_WLAN_LFR3=y
 CONFIG_PRIMA_WLAN_OKC=y
 CONFIG_PRIMA_WLAN_11AC_HIGH_TP=y
